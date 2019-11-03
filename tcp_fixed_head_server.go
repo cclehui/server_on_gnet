@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/panjf2000/ants"
@@ -15,6 +20,7 @@ import (
 //tcp server 简单的 固定头部长度协议
 
 const DefaultAntsPoolSize = 1024 * 1024
+const DefaultHeadLength = 5
 
 func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
 
@@ -41,11 +47,16 @@ func (tcpfhs *TCPFixHeadServer) OnInitComplete(srv gnet.Server) (action gnet.Act
 	return
 }
 func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
-	out = c.Read()
+	fmt.Println("rrrrrrrrrrrr")
 
 	tcpfhs.WorkerPool.Submit(func() {
-		protocal := &TCPFixHeadProtocal{Conn: c}
-		protocal.decode(out)
+		protocal := &TCPFixHeadProtocal{HeadLength: DefaultHeadLength, Conn: c}
+
+		if protocalData, err := protocal.decode(); protocalData != nil {
+
+			fmt.Printf("完整协议数据1111, %#v, error:%v\n", protocalData, err)
+
+		}
 	})
 	return
 }
@@ -53,25 +64,101 @@ func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Acti
 type ProtocalData struct {
 	Type       int8
 	DataLength int
-	data       []byte
+	Data       []byte
 }
 
 type TCPFixHeadProtocal struct {
-	Conn    gnet.Conn
-	Handler func(pdata *ProtocalData)
+	HeadLength int
+	Conn       gnet.Conn
+	Handler    func(pdata *ProtocalData)
 }
 
-func (tcpfhp *TCPFixHeadProtocal) decode(data []byte) (*ProtocalData, error) {
-	if len(data) < 5 {
-		return nil, errors.New("data not full")
+// input 数据 decode
+func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
+
+	curConContext := tcpfhp.Conn.Context()
+
+	if curConContext == nil {
+		//解析协议 header
+		if tempSize, headData := tcpfhp.Conn.ReadN(tcpfhp.HeadLength); tempSize == tcpfhp.HeadLength {
+
+			fmt.Println("hhhhhhhhh,", headData)
+
+			newConContext := ProtocalData{}
+			//数据长度
+			var length int32
+			//lengthBytesBuffer := bytes.NewBuffer(headData[1:tcpfhp.HeadLength])
+			lengthBytesBuffer := bytes.NewReader(headData[1:tcpfhp.HeadLength])
+			err := binary.Read(lengthBytesBuffer, binary.BigEndian, &length)
+			if err != nil {
+				fmt.Println("eeee11111,", err)
+				return nil, err
+			}
+			newConContext.DataLength = int(length)
+
+			//数据类型
+			var dataType int8
+			//typeBytesBuffer := bytes.NewBuffer(headData[0:1])
+			typeBytesBuffer := bytes.NewReader(headData[0:1])
+			err2 := binary.Read(typeBytesBuffer, binary.BigEndian, &dataType)
+			if err2 != nil {
+				return nil, err2
+			}
+			newConContext.Type = dataType
+
+			fmt.Println("hhhhhhhhh, 2222222222,", newConContext)
+
+			tcpfhp.Conn.SetContext(newConContext)
+
+			return nil, nil
+
+		} else {
+			return nil, nil
+		}
+
+	} else {
+		//解析协议数据
+		if protocalData, ok := curConContext.(ProtocalData); !ok {
+			tcpfhp.Conn.SetContext(nil)
+			return nil, errors.New("context 数据异常")
+
+		} else {
+			dataLength := protocalData.DataLength
+
+			if dataLength < 1 {
+				return &protocalData, nil
+			}
+
+			if tempSize, data := tcpfhp.Conn.ReadN(dataLength); tempSize == dataLength {
+				protocalData.Data = data
+
+				return &protocalData, nil
+
+			} else {
+				return nil, nil
+			}
+		}
 	}
-
-	fmt.Println(time.Now().Format("2006-01-02 15:04:05"), "\t", string(data))
-
-	//if 如果是整个解析完成
-	//tcpfhp.Conn.ResetBuffer()
-
 	return nil, nil
+}
+
+//output 数据编码
+func (tcpfhp *TCPFixHeadProtocal) encode(output string) ([]byte, error) {
+
+	dataLength := len(output)
+
+	result := []byte(fmt.Sprintf("0%d%s", dataLength, output))
+
+	/*
+		result := make([]byte, tcpfhp.HeadLength+dataLength)
+
+		dataReader := bytes.NewBufferString(fmt.Sprintf("0%d%s", dataLength, output))
+
+		binary.Read(dataReader, binary.LittleEndian, result)
+	*/
+
+	return result, nil
+
 }
 
 type TCPFixHeadClient struct {
@@ -90,6 +177,40 @@ func main() {
 
 	tcpServer := NewTCPFixHeadServer(port)
 
+	fmt.Printf("tttttt, %x\n", 825307185)
+
+	go func() {
+		tcpFHTestClient(port)
+	}()
+
 	log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", port), gnet.WithMulticore(multicore)))
+
+}
+
+func tcpFHTestClient(port int) {
+
+	time.Sleep(time.Second * 3)
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", port))
+	//_, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", port))
+
+	if err != nil {
+		log.Printf("tcpFHTestClient, Dail error:%v\n", err)
+	}
+
+	for i := 1; i <= 10; i++ {
+		data := strings.Repeat(strconv.Itoa(i), i)
+
+		protocal := &TCPFixHeadProtocal{HeadLength: DefaultHeadLength}
+
+		if dataEncoded, err2 := protocal.encode(data); err2 == nil {
+			fmt.Println(string(dataEncoded))
+			conn.Write(dataEncoded)
+		}
+
+		fmt.Println(data)
+
+		time.Sleep(time.Second * 1)
+	}
 
 }
