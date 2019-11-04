@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -20,7 +19,7 @@ import (
 //tcp server 简单的 固定头部长度协议
 
 const DefaultAntsPoolSize = 1024 * 1024
-const DefaultHeadLength = 5
+const DefaultHeadLength = 6
 
 func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
 
@@ -54,7 +53,7 @@ func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Acti
 
 		if protocalData, err := protocal.decode(); protocalData != nil {
 
-			fmt.Printf("完整协议数据1111, %#v, error:%v\n", protocalData, err)
+			fmt.Printf("完整协议数据1111, %v, error:%v\n", protocalData, err)
 
 		}
 	})
@@ -62,8 +61,8 @@ func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Acti
 }
 
 type ProtocalData struct {
-	Type       int8
-	DataLength int
+	Type       uint16
+	DataLength uint32
 	Data       []byte
 }
 
@@ -86,25 +85,30 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 
 			newConContext := ProtocalData{}
 			//数据长度
-			var length int32
-			//lengthBytesBuffer := bytes.NewBuffer(headData[1:tcpfhp.HeadLength])
-			lengthBytesBuffer := bytes.NewReader(headData[1:tcpfhp.HeadLength])
-			err := binary.Read(lengthBytesBuffer, binary.BigEndian, &length)
-			if err != nil {
-				fmt.Println("eeee11111,", err)
-				return nil, err
-			}
-			newConContext.DataLength = int(length)
+			/*
+				var length uint32
+				lengthBytesBuffer := bytes.NewBuffer(headData[1:tcpfhp.HeadLength])
+				err := binary.Read(lengthBytesBuffer, binary.BigEndian, &length)
+				if err != nil {
+					fmt.Println("eeee11111,", err)
+					return nil, err
+				}
+				newConContext.DataLength = length
+			*/
+
+			newConContext.DataLength = binary.BigEndian.Uint32(headData[2:tcpfhp.HeadLength])
 
 			//数据类型
-			var dataType int8
-			//typeBytesBuffer := bytes.NewBuffer(headData[0:1])
-			typeBytesBuffer := bytes.NewReader(headData[0:1])
-			err2 := binary.Read(typeBytesBuffer, binary.BigEndian, &dataType)
-			if err2 != nil {
-				return nil, err2
-			}
-			newConContext.Type = dataType
+			/*
+				var dataType int8
+				typeBytesBuffer := bytes.NewReader(headData[0:1])
+				err2 := binary.Read(typeBytesBuffer, binary.BigEndian, &dataType)
+				if err2 != nil {
+					return nil, err2
+				}
+				newConContext.Type = dataType
+			*/
+			newConContext.Type = binary.BigEndian.Uint16(headData[0:2])
 
 			fmt.Println("hhhhhhhhh, 2222222222,", newConContext)
 
@@ -123,7 +127,7 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 			return nil, errors.New("context 数据异常")
 
 		} else {
-			dataLength := protocalData.DataLength
+			dataLength := int(protocalData.DataLength)
 
 			if dataLength < 1 {
 				return &protocalData, nil
@@ -145,20 +149,18 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 //output 数据编码
 func (tcpfhp *TCPFixHeadProtocal) encode(output string) ([]byte, error) {
 
-	dataLength := len(output)
+	var dataLength uint32 = uint32(len(output))
 
-	result := []byte(fmt.Sprintf("0%d%s", dataLength, output))
+	var dataType uint16 = 0
 
-	/*
-		result := make([]byte, tcpfhp.HeadLength+dataLength)
+	//result := []byte(fmt.Sprintf("0%d%s", dataLength, output))
 
-		dataReader := bytes.NewBufferString(fmt.Sprintf("0%d%s", dataLength, output))
-
-		binary.Read(dataReader, binary.LittleEndian, result)
-	*/
+	result := make([]byte, tcpfhp.HeadLength)
+	binary.BigEndian.PutUint16(result[0:2], dataType)
+	binary.BigEndian.PutUint32(result[2:tcpfhp.HeadLength], dataLength)
+	result = append(result, []byte(output)...)
 
 	return result, nil
-
 }
 
 type TCPFixHeadClient struct {
