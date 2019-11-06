@@ -19,8 +19,14 @@ import (
 //网络编程
 //tcp server 简单的 固定头部长度协议
 
-const DefaultAntsPoolSize = 1024 * 1024
-const DefaultHeadLength = 6
+const (
+	DefaultAntsPoolSize = 1024 * 1024
+	DefaultHeadLength   = 8
+
+	PROTOCAL_VERSION = 0x8001 //协议版本
+
+	ACTION_PING = 0x0001 // ping行为
+)
 
 func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
 
@@ -53,7 +59,7 @@ func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Acti
 	protocal := &TCPFixHeadProtocal{HeadLength: DefaultHeadLength, Conn: c}
 	protocalData, err := protocal.decode()
 	if err != nil {
-		log.Printf("React WorkerPool Handler error :%v\n", err)
+		log.Printf("React WorkerPool Decode error :%v\n", err)
 	}
 
 	tcpfhs.WorkerPool.Submit(func() {
@@ -67,7 +73,8 @@ func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Acti
 }
 
 type ProtocalData struct {
-	Type       uint16
+	Version    uint16 //协议版本标识
+	Type       uint16 //行为定义
 	DataLength uint32
 	Data       []byte
 
@@ -93,8 +100,17 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 			newConContext := ProtocalData{}
 			//数据长度
 			bytesBuffer := bytes.NewBuffer(headData)
+			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Version)
 			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Type)
 			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.DataLength)
+
+			fmt.Println("xxxxxxxxxx,", newConContext, ",     ", PROTOCAL_VERSION)
+
+			if newConContext.Version != PROTOCAL_VERSION {
+				//非正常协议数据 重置buffer
+				tcpfhp.Conn.ResetBuffer()
+				return nil, errors.New("not normal protocal data, reset buffer")
+			}
 
 			tcpfhp.Conn.SetContext(newConContext)
 
@@ -131,26 +147,20 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 }
 
 //output 数据编码
-func (tcpfhp *TCPFixHeadProtocal) encodeWrite(output []byte, conn net.Conn) error {
+func (tcpfhp *TCPFixHeadProtocal) encodeWrite(actionType uint16, data []byte, conn net.Conn) error {
 
-	var dataLength uint32 = uint32(len(output))
+	pdata := ProtocalData{}
+	pdata.Version = PROTOCAL_VERSION
+	pdata.Type = actionType
+	pdata.DataLength = uint32(len(data))
+	pdata.Data = data
 
-	var dataType uint16 = 0
+	fmt.Println("发出的数据:", pdata)
 
-	fmt.Println("发出的数据:", output)
-
-	//result := []byte(fmt.Sprintf("0%d%s", dataLength, output))
-
-	fmt.Println("encodeWrite,", binary.Write(conn, binary.BigEndian, &dataType))
-	binary.Write(conn, binary.BigEndian, &dataLength)
-	binary.Write(conn, binary.BigEndian, &output)
-
-	/*
-		result := make([]byte, tcpfhp.HeadLength)
-		binary.BigEndian.PutUint16(result[0:2], dataType)
-		binary.BigEndian.PutUint32(result[2:tcpfhp.HeadLength], dataLength)
-		result = append(result, []byte(output)...)
-	*/
+	fmt.Println("encodeWrite,", binary.Write(conn, binary.BigEndian, &pdata.Version))
+	binary.Write(conn, binary.BigEndian, &pdata.Type)
+	binary.Write(conn, binary.BigEndian, &pdata.DataLength)
+	binary.Write(conn, binary.BigEndian, &pdata.Data)
 
 	return nil
 }
@@ -192,23 +202,21 @@ func tcpFHTestClient(port int) {
 		log.Printf("tcpFHTestClient, Dail error:%v\n", err)
 	}
 
-	//badData := []byte("xxx")
+	badData := []byte("xxx")
 
 	for i := 1; i <= 10; i++ {
 		//for i := 1; i <= 2; i++ {
 		data := strings.Repeat(strconv.Itoa(i), i)
 		data = data + "abc"
 
-		/*
-			if i == 2 {
-				err2 := binary.Write(conn, binary.BigEndian, badData)
-				fmt.Println("发送干扰数据, ", err2)
-			}
-		*/
+		if i == 2 {
+			err2 := binary.Write(conn, binary.BigEndian, badData)
+			fmt.Println("发送干扰数据, ", err2)
+		}
 
 		protocal := &TCPFixHeadProtocal{HeadLength: DefaultHeadLength}
 
-		protocal.encodeWrite([]byte(data), conn)
+		protocal.encodeWrite(ACTION_PING, []byte(data), conn)
 
 		fmt.Println(data)
 
