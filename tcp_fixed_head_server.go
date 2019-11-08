@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -29,10 +28,23 @@ func main() {
 
 	tcpServer := tcp_fixed_head.NewTCPFixHeadServer(port)
 
+	go func() {
+		for {
+			fmt.Println("当前连接数量:", tcpServer.ConnNum)
+
+			time.Sleep(time.Second * 1)
+		}
+
+	}()
+
 	fmt.Printf("tttttt, %x\n", 825307185)
 
 	go func() {
-		tcpFHTestClient(port)
+		for i := 0; i < 50000; i++ {
+			go func() {
+				tcpFHTestClient(port)
+			}()
+		}
 	}()
 
 	log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", port), gnet.WithMulticore(multicore)))
@@ -50,19 +62,20 @@ func tcpFHTestClient(port int) {
 		log.Printf("tcpFHTestClient, Dail error:%v\n", err)
 	}
 
-	badData := []byte("xxx")
-
 	for i := 1; i <= 10; i++ {
 		//for i := 1; i <= 2; i++ {
 		data := strings.Repeat(strconv.Itoa(i), i)
 		data = data + "abc"
 
-		if i == 2 {
-			err2 := binary.Write(conn, binary.BigEndian, badData)
-			fmt.Println("发送干扰数据, ", err2)
-		}
+		/*
+			if i == 2 {
+				badData := []byte("xxx")
+				err2 := binary.Write(conn, binary.BigEndian, badData)
+				fmt.Println("发送干扰数据, ", err2)
+			}
+		*/
 
-		fmt.Println("发送数据\t", data)
+		//fmt.Println("发送数据\t", data)
 
 		protocal := tcp_fixed_head.NewTCPFixHeadProtocal()
 
