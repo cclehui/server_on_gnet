@@ -37,10 +37,8 @@ func main() {
 
 	}()
 
-	fmt.Printf("tttttt, %x\n", 825307185)
-
 	go func() {
-		for i := 0; i < 50000; i++ {
+		for i := 0; i < 1; i++ {
 			go func() {
 				tcpFHTestClient(port)
 			}()
@@ -51,6 +49,7 @@ func main() {
 
 }
 
+//测试 client
 func tcpFHTestClient(port int) {
 
 	time.Sleep(time.Second * 3)
@@ -79,7 +78,13 @@ func tcpFHTestClient(port int) {
 
 		protocal := tcp_fixed_head.NewTCPFixHeadProtocal()
 
-		protocal.EncodeWrite(tcp_fixed_head.ACTION_PING, []byte(data), conn)
+		//直接encode 并发送
+		//protocal.EncodeWrite(tcp_fixed_head.ACTION_PING, []byte(data), conn)
+
+		//返回encode 的数据， 然后发送
+		encodedData, _ := protocal.Encode(tcp_fixed_head.ACTION_PING, []byte(data))
+		fmt.Println("11111,", encodedData)
+		conn.Write(encodedData)
 
 		time.Sleep(time.Second * 1)
 	}

@@ -12,7 +12,7 @@ import (
 
 type ProtocalData struct {
 	Version    uint16 //协议版本标识
-	Type       uint16 //行为定义
+	ActionType uint16 //行为定义
 	DataLength uint32
 	Data       []byte
 
@@ -42,10 +42,11 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 			//数据长度
 			bytesBuffer := bytes.NewBuffer(headData)
 			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Version)
-			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Type)
+			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.ActionType)
 			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.DataLength)
 
-			if newConContext.Version != PROTOCAL_VERSION {
+			if newConContext.Version != PROTOCAL_VERSION ||
+				!isCorrectAction(newConContext.ActionType) {
 				//非正常协议数据 重置buffer
 				tcpfhp.Conn.ResetBuffer()
 				return nil, errors.New("not normal protocal data, reset buffer")
@@ -94,7 +95,7 @@ func (tcpfhp *TCPFixHeadProtocal) EncodeWrite(actionType uint16, data []byte, co
 
 	pdata := ProtocalData{}
 	pdata.Version = PROTOCAL_VERSION
-	pdata.Type = actionType
+	pdata.ActionType = actionType
 	pdata.DataLength = uint32(len(data))
 	pdata.Data = data
 
@@ -102,7 +103,7 @@ func (tcpfhp *TCPFixHeadProtocal) EncodeWrite(actionType uint16, data []byte, co
 		return errors.New(fmt.Sprintf("encodeWrite version error , %v", err))
 	}
 
-	if err := binary.Write(conn, binary.BigEndian, &pdata.Type); err != nil {
+	if err := binary.Write(conn, binary.BigEndian, &pdata.ActionType); err != nil {
 		return errors.New(fmt.Sprintf("encodeWrite type error , %v", err))
 	}
 
@@ -110,9 +111,45 @@ func (tcpfhp *TCPFixHeadProtocal) EncodeWrite(actionType uint16, data []byte, co
 		return errors.New(fmt.Sprintf("encodeWrite datalength error , %v", err))
 	}
 
-	if err := binary.Write(conn, binary.BigEndian, &pdata.Data); err != nil {
-		return errors.New(fmt.Sprintf("encodeWrite data error , %v", err))
+	if pdata.DataLength > 0 {
+		if err := binary.Write(conn, binary.BigEndian, &pdata.Data); err != nil {
+			return errors.New(fmt.Sprintf("encodeWrite data error , %v", err))
+		}
 	}
 
 	return nil
+}
+
+//数据编码
+func (tcpfhp *TCPFixHeadProtocal) Encode(actionType uint16, data []byte) ([]byte, error) {
+
+	pdata := ProtocalData{}
+	pdata.Version = PROTOCAL_VERSION
+	pdata.ActionType = actionType
+	pdata.DataLength = uint32(len(data))
+	pdata.Data = data
+
+	result := make([]byte, 0)
+
+	buffer := bytes.NewBuffer(result)
+
+	if err := binary.Write(buffer, binary.BigEndian, &pdata.Version); err != nil {
+		return nil, errors.New(fmt.Sprintf("encode version error , %v", err))
+	}
+
+	if err := binary.Write(buffer, binary.BigEndian, &pdata.ActionType); err != nil {
+		return nil, errors.New(fmt.Sprintf("encode type error , %v", err))
+	}
+
+	if err := binary.Write(buffer, binary.BigEndian, &pdata.DataLength); err != nil {
+		return nil, errors.New(fmt.Sprintf("encode datalength error , %v", err))
+	}
+
+	if pdata.DataLength > 0 {
+		if err := binary.Write(buffer, binary.BigEndian, &pdata.Data); err != nil {
+			return nil, errors.New(fmt.Sprintf("encode data error , %v", err))
+		}
+	}
+
+	return buffer.Bytes(), nil
 }

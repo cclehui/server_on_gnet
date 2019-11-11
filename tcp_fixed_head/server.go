@@ -8,12 +8,35 @@ import (
 	"github.com/panjf2000/gnet"
 )
 
-type ServerHandler func(pdata *ProtocalData)
+type HandlerDataType struct {
+	ProtocalData *ProtocalData
 
-var defaultHandler ServerHandler = func(pdata *ProtocalData) {
-	if pdata != nil {
-		//fmt.Printf("完整协议数据1111, %v, data:%s\n", pdata, string(pdata.Data))
+	Conn gnet.Conn
+
+	server *TCPFixHeadServer
+}
+type ServerHandler func(handlerData *HandlerDataType)
+
+var defaultHandler ServerHandler = func(handlerData *HandlerDataType) {
+	if handlerData.ProtocalData == nil {
+		return
 	}
+
+	protocal := NewTCPFixHeadProtocal()
+
+	//cclehui_todo
+	switch handlerData.ProtocalData.ActionType {
+	case ACTION_PING:
+		pongData, err := protocal.Encode(ACTION_PONG, nil)
+		//log.Printf("server encode pong , %v, err:%v", pongData, err)
+
+		if handlerData.Conn != nil {
+			handlerData.Conn.AsyncWrite(pongData)
+		}
+
+	}
+
+	log.Printf("完整协议数据1111, %v, data:%s\n", handlerData.ProtocalData, string(handlerData.ProtocalData.Data))
 }
 
 func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
@@ -67,7 +90,11 @@ func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Acti
 
 	tcpfhs.WorkerPool.Submit(func() {
 		//具体业务在 worker pool中处理
-		tcpfhs.Handler(protocalData)
+		handlerData := &HandlerDataType{}
+		handlerData.ProtocalData = protocalData
+		handlerData.Conn = c
+		handlerData.server = tcpfhs
+		tcpfhs.Handler(handlerData)
 	})
 	return
 }
