@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/panjf2000/gnet"
@@ -25,12 +26,17 @@ type TCPFixHeadProtocal struct {
 	Conn       gnet.Conn
 }
 
+//new protocal
 func NewTCPFixHeadProtocal() *TCPFixHeadProtocal {
 	return &TCPFixHeadProtocal{HeadLength: DefaultHeadLength}
 }
 
-// input 数据 decode
-func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
+func (tcpfhp *TCPFixHeadProtocal) SetGnetConnection(gnetConn gnet.Conn) {
+	tcpfhp.Conn = gnetConn
+}
+
+// server端 gnet input 数据 decode
+func (tcpfhp *TCPFixHeadProtocal) serverDecode() (*ProtocalData, error) {
 
 	curConContext := tcpfhp.Conn.Context()
 
@@ -84,6 +90,38 @@ func (tcpfhp *TCPFixHeadProtocal) decode() (*ProtocalData, error) {
 	}
 
 	return nil, nil
+}
+
+// client 端获取解包后的数据
+func (tcpfhp *TCPFixHeadProtocal) ClientDecode(rawConn net.Conn) (*ProtocalData, error) {
+
+	newPackage := ProtocalData{}
+
+	headData := make([]byte, tcpfhp.HeadLength)
+	n, err := io.ReadFull(rawConn, headData)
+	if n != tcpfhp.HeadLength {
+		return nil, err
+	}
+
+	//数据长度
+	bytesBuffer := bytes.NewBuffer(headData)
+	binary.Read(bytesBuffer, binary.BigEndian, &newPackage.Version)
+	binary.Read(bytesBuffer, binary.BigEndian, &newPackage.ActionType)
+	binary.Read(bytesBuffer, binary.BigEndian, &newPackage.DataLength)
+
+	if newPackage.DataLength < 1 {
+		return &newPackage, nil
+	}
+
+	data := make([]byte, newPackage.DataLength)
+	dataNum, err2 := io.ReadFull(rawConn, data)
+	if uint32(dataNum) != newPackage.DataLength {
+		return nil, errors.New(fmt.Sprintf("read data error, %v", err2))
+	}
+
+	newPackage.Data = data
+
+	return &newPackage, nil
 }
 
 //output 数据编码

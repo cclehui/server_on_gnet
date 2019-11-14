@@ -61,6 +61,8 @@ func tcpFHTestClient(port int) {
 		log.Printf("tcpFHTestClient, Dail error:%v\n", err)
 	}
 
+	protocal := tcp_fixed_head.NewTCPFixHeadProtocal()
+
 	for i := 1; i <= 10; i++ {
 		//for i := 1; i <= 2; i++ {
 		data := strings.Repeat(strconv.Itoa(i), i)
@@ -76,8 +78,6 @@ func tcpFHTestClient(port int) {
 
 		//fmt.Println("发送数据\t", data)
 
-		protocal := tcp_fixed_head.NewTCPFixHeadProtocal()
-
 		//直接encode 并发送
 		//protocal.EncodeWrite(tcp_fixed_head.ACTION_PING, []byte(data), conn)
 
@@ -87,6 +87,18 @@ func tcpFHTestClient(port int) {
 		conn.Write(encodedData)
 
 		time.Sleep(time.Second * 1)
+	}
+
+	for {
+
+		response, err := protocal.ClientDecode(conn)
+
+		if err != nil {
+			log.Printf("获取服务端数据异常, %v\n", err)
+		}
+
+		log.Printf("服务端返回的数据, %v, data:%s\n", response, string(response.Data))
+
 	}
 
 	time.Sleep(time.Second * 86400)

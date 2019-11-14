@@ -28,7 +28,9 @@ var defaultHandler ServerHandler = func(handlerData *HandlerDataType) {
 	switch handlerData.ProtocalData.ActionType {
 	case ACTION_PING:
 		pongData, err := protocal.Encode(ACTION_PONG, nil)
-		//log.Printf("server encode pong , %v, err:%v", pongData, err)
+		if err != nil {
+			log.Printf("server encode pong , %v, err:%v", pongData, err)
+		}
 
 		if handlerData.Conn != nil {
 			handlerData.Conn.AsyncWrite(pongData)
@@ -36,7 +38,7 @@ var defaultHandler ServerHandler = func(handlerData *HandlerDataType) {
 
 	}
 
-	log.Printf("完整协议数据1111, %v, data:%s\n", handlerData.ProtocalData, string(handlerData.ProtocalData.Data))
+	log.Printf("服务端收到数据, %v, data:%s\n", handlerData.ProtocalData, string(handlerData.ProtocalData.Data))
 }
 
 func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
@@ -82,8 +84,10 @@ func (tcpfhs *TCPFixHeadServer) OnClosed(c gnet.Conn, err error) (action gnet.Ac
 func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
 
 	//在 reactor 协程中做解码操作
-	protocal := &TCPFixHeadProtocal{HeadLength: DefaultHeadLength, Conn: c}
-	protocalData, err := protocal.decode()
+	protocal := NewTCPFixHeadProtocal()
+	protocal.SetGnetConnection(c)
+
+	protocalData, err := protocal.serverDecode()
 	if err != nil {
 		log.Printf("React WorkerPool Decode error :%v\n", err)
 	}
