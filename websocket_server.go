@@ -11,15 +11,16 @@ import (
 )
 
 func home(w http.ResponseWriter, r *http.Request) {
-	websocket.ClientTemplate.Execute(w, "ws://"+r.Host+"/echo")
+	//websocket.ClientTemplate.Execute(w, "ws://"+r.Host+"/echo")
+	websocket.ClientTemplate.Execute(w, "ws://172.16.9.216:8081")
 }
 
 func main() {
 
 	go func() {
-		tcpServer := &WebsocketServer(port)
+		tcpServer := &WebsocketServer{}
 
-		log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", 8081), gnet.WithMulticore(multicore)))
+		log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", 8081), gnet.WithMulticore(true)))
 
 	}()
 
@@ -57,9 +58,30 @@ func (server *WebsocketServer) OnClosed(c gnet.Conn, err error) (action gnet.Act
 
 func (server *WebsocketServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
 
-	fmt.Printf("react, %v\n", c.Read())
+	fmt.Printf("react, 当前全部数据, 1111, %v\n", c.Read())
+	fmt.Printf("react, 当前全部数据, 2222, %s\n", string(c.Read()))
 
-	c.ResetBuffer()
+	if c.Context() == nil {
+		upgraderConn := websocket.GnetUpgraderConn{}
+		upgraderConn.GnetConn = c
+		upgraderConn.Upgrader = websocket.DefaultUpgrader
+
+		c.SetContext(upgraderConn)
+	}
+
+	if upgraderConn, ok := c.Context().(websocket.GnetUpgraderConn); ok {
+
+		_, err := upgraderConn.Upgrader.Upgrade(upgraderConn)
+
+		if err != nil {
+			log.Printf("react ws 协议升级异常， %v\n", err)
+		}
+
+	} else {
+		log.Println("react contenxt 数据格式异常")
+	}
+
+	//c.ResetBuffer()
 
 	//在 reactor 协程中做解码操作
 	/*
