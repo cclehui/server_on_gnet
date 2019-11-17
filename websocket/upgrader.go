@@ -12,7 +12,9 @@ import (
 //协议升级, conn处理
 type GnetUpgraderConn struct {
 	GnetConn gnet.Conn
-	Upgrader ws.Upgrader
+
+	IsSuccessUpgraded bool
+	Upgrader          ws.Upgrader
 }
 
 func (u GnetUpgraderConn) Read(b []byte) (n int, err error) {
@@ -50,12 +52,32 @@ func (u GnetUpgraderConn) Write(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
+func NewDefaultUpgrader(conn gnet.Conn) *GnetUpgraderConn {
+	return &GnetUpgraderConn{
+		GnetConn: conn,
+
+		Upgrader:          defaultUpgrader,
+		IsSuccessUpgraded: false,
+	}
+}
+
+func NewEmptyUpgrader(conn gnet.Conn) *GnetUpgraderConn {
+	return &GnetUpgraderConn{
+		GnetConn: conn,
+
+		Upgrader:          emptyUpgrader,
+		IsSuccessUpgraded: false,
+	}
+}
+
 // Prepare handshake header writer from http.Header mapping.
 var header = ws.HandshakeHeaderHTTP(http.Header{
-	"X-Go-Version-cccc": []string{runtime.Version()},
+	"X-Go-Version-CCLehui": []string{runtime.Version()},
 })
 
-var DefaultUpgrader = ws.Upgrader{
+var emptyUpgrader = ws.Upgrader{}
+
+var defaultUpgrader = ws.Upgrader{
 	OnHost: func(host []byte) error {
 		if string(host) == "github.com" {
 			return nil
@@ -64,48 +86,20 @@ var DefaultUpgrader = ws.Upgrader{
 		log.Printf("ws OnHost:%s\n", string(host))
 
 		return nil
-
-		/*
-			return ws.RejectConnectionError(
-				ws.RejectionStatus(403),
-				ws.RejectionHeader(ws.HandshakeHeaderString(
-					"X-Want-Host: github.com\r\n",
-				)),
-			)
-		*/
 	},
 
 	OnHeader: func(key, value []byte) error {
 		log.Printf("ws OnHeader, key:%s, value:%s\n", string(key), string(value))
 
 		return nil
-
-		/*
-			if string(key) != "Cookie" {
-				return nil
-			}
-			ok := httphead.ScanCookie(value, func(key, value []byte) bool {
-				// Check session here or do some other stuff with cookies.
-				// Maybe copy some values for future use.
-				return true
-			})
-			if ok {
-				return nil
-			}
-			return ws.RejectConnectionError(
-				ws.RejectionReason("bad cookie"),
-				ws.RejectionStatus(400),
-			)
-		*/
 	},
 	OnBeforeUpgrade: func() (ws.HandshakeHeader, error) {
-		log.Printf("ws OnBeforeUpgrade:11111111111\n")
+		log.Printf("ws OnBeforeUpgrade\n")
 		return header, nil
 	},
 
 	OnRequest: func(uri []byte) error {
 		log.Printf("ws OnRequest: data uri: %v\n", string(uri))
-
 		return nil
 	},
 }
