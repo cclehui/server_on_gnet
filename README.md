@@ -25,3 +25,10 @@ tcpServer := websocket.NewEchoServer(port)
 log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", port), gnet.WithMulticore(multicore)))
 
 ```
+
+## todo
+1. mqtt协议
+2. 连接管理
+3. pb协议
+4. thrift协议
+5. 长连接维持平台
