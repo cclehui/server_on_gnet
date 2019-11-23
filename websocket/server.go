@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"github.com/panjf2000/ants"
 	"github.com/panjf2000/gnet"
@@ -86,25 +87,44 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 		} else {
 			//正常的数据处理过程
 
-			msg, op, err := wsutil.ReadClientData(upgraderConn)
 			//在 reactor 协程中做解码操作
+			//msg, op, err := wsutil.ReadClientData(upgraderConn)
+			//frame, err := ws.ReadFrame(upgraderConn)
+			messages, err := wsutil.ReadClientMessage(upgraderConn, nil)
 
 			if err == nil {
 				//log.Printf("本次收到的消息, op:%v,  msg:%v\n", op, msg)
 
-				server.WorkerPool.Submit(func() {
-					//具体业务在 worker pool中处理
-					handlerParam := &DataHandlerParam{}
-					handlerParam.OpCode = op
-					handlerParam.Request = msg
-					handlerParam.Writer = upgraderConn
-					handlerParam.server = server
+				for _, message := range messages {
 
-					server.Handler(handlerParam)
-				})
+					switch message.OpCode {
+					case ws.OpPing:
+						log.Printf("ping, message:%v\n", message)
+						wsutil.WriteServerMessage(upgraderConn, ws.OpPong, nil)
+					case ws.OpText:
+						server.WorkerPool.Submit(func() {
+							//具体业务在 worker pool中处理
+							handlerParam := &DataHandlerParam{}
+							handlerParam.OpCode = message.OpCode
+							handlerParam.Request = message.Payload
+							handlerParam.Writer = upgraderConn
+							handlerParam.server = server
+
+							server.Handler(handlerParam)
+						})
+					case ws.OpClose:
+						log.Printf("关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
+						//关闭连接
+						ws.WriteFrame(upgraderConn, ws.NewCloseFrame(nil))
+						return nil, gnet.Close
+
+					default:
+						log.Printf("操作暂不支持, message:%v,  error:%v\n", message)
+					}
+				}
 
 			} else {
-				log.Printf("本次收到的消息不完整, op:%v,  msg:%v, error:%v\n", op, msg, err)
+				log.Printf("本次收到的消息不完整, message:%v,  error:%v\n", messages, err)
 			}
 
 		}

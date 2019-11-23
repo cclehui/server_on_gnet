@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/cclehui/server_on_gnet/websocket"
 	"github.com/panjf2000/gnet"
@@ -22,6 +23,15 @@ func main() {
 		port := 8081
 
 		tcpServer := websocket.NewEchoServer(port)
+
+		go func() {
+			for {
+				fmt.Println("当前连接数量:", tcpServer.ConnNum)
+
+				time.Sleep(time.Second * 2)
+			}
+
+		}()
 		log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", port), gnet.WithMulticore(true)))
 
 	}()

@@ -31,6 +31,8 @@ func EchoDataHandler(param *DataHandlerParam) {
 
 	//param.Writer.Write([]byte(response))
 
+	//ws.WriteFrame(param.Writer, ws.NewTextFrame([]byte(response)))
+
 	wsutil.WriteServerMessage(param.Writer, param.OpCode, []byte(response))
 
 	return
