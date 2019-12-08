@@ -8,3 +8,5 @@ require (
 	github.com/panjf2000/gnet v1.0.0-beta.8
 	google.golang.org/grpc v1.25.1
 )
+
+replace google.golang.org/grpc => /home/godev/go_workspace/src/google.golang.org/grpc
