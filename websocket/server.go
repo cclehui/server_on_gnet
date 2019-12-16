@@ -22,14 +22,14 @@ type WebSocketServer struct {
 
 func NewEchoServer(port int) *WebSocketServer {
 
-	server := newServer(port)
+	server := NewServer(port)
 
 	server.Handler = EchoDataHandler
 
 	return server
 }
 
-func newServer(port int) *WebSocketServer {
+func NewServer(port int) *WebSocketServer {
 
 	options := ants.Options{ExpiryDuration: time.Second * 10, Nonblocking: true}
 	defaultAntsPool, _ := ants.NewPool(DefaultAntsPoolSize, ants.WithOptions(options))
