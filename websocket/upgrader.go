@@ -4,19 +4,47 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"time"
 
 	"github.com/gobwas/ws"
 	"github.com/panjf2000/gnet"
 )
 
-//协议升级, conn处理
+//协议升级, conn处理 业务层conn
 type GnetUpgraderConn struct {
 	GnetConn gnet.Conn
+
+	UniqId int //连接的全局唯一id ?
+
+	LastActiveTs int64 //上次活跃的时间 unix 时间戳
 
 	IsSuccessUpgraded bool
 	Upgrader          ws.Upgrader
 }
 
+//连接超时管理函数
+func timeWheelJob(param *jobParam) {
+	if param == nil || param.wsConn == nil {
+		return
+	}
+
+	diffNow := time.Now().Unix() - param.wsConn.LastActiveTs
+
+	if diffNow > ConnMaxIdleSeconds {
+		//长时间未活跃
+		log.Printf("server关闭连接, 连接空闲%d秒, %v\n", ConnMaxIdleSeconds, param.wsConn)
+		//关闭连接
+		ws.WriteFrame(param.wsConn, ws.NewCloseFrame(nil))
+	} else {
+		if param.server != nil {
+			//进入新的时间循环
+			param.server.connTimeWheel.AddTimer(time.Second*time.Duration((ConnMaxIdleSeconds-diffNow)), nil, param)
+		}
+	}
+
+}
+
+// 读数据 这里为什么没用 *GnetUpgraderConn ?
 func (u GnetUpgraderConn) Read(b []byte) (n int, err error) {
 
 	targetLength := len(b)
@@ -45,6 +73,7 @@ func (u GnetUpgraderConn) Read(b []byte) (n int, err error) {
 	return n, nil
 }
 
+//写数据 这里为什么没用 *GnetUpgraderConn ?
 func (u GnetUpgraderConn) Write(b []byte) (n int, err error) {
 
 	u.GnetConn.AsyncWrite(b)
@@ -52,6 +81,13 @@ func (u GnetUpgraderConn) Write(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
+//更新连接活跃时间到当前时间
+func (u *GnetUpgraderConn) UpdateActiveTsToNow() {
+	u.LastActiveTs = time.Now().Unix()
+
+}
+
+//默认的协议升级类
 func NewDefaultUpgrader(conn gnet.Conn) *GnetUpgraderConn {
 	return &GnetUpgraderConn{
 		GnetConn: conn,
@@ -75,8 +111,10 @@ var header = ws.HandshakeHeaderHTTP(http.Header{
 	"X-Go-Version-CCLehui": []string{runtime.Version()},
 })
 
+//空的协议升级类
 var emptyUpgrader = ws.Upgrader{}
 
+//默认的协议升级处理类
 var defaultUpgrader = ws.Upgrader{
 	OnHost: func(host []byte) error {
 		if string(host) == "github.com" {

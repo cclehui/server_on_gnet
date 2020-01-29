@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/gobwas/ws"
@@ -12,12 +13,13 @@ import (
 
 type WebSocketServer struct {
 	*gnet.EventServer
-	Port       int
-	WorkerPool *ants.Pool
+	Port    int
+	ConnNum int64
 
-	ConnNum int
+	Handler    DataHandler //业务处理具体实现
+	WorkerPool *ants.Pool  //业务处理协程池
 
-	Handler DataHandler
+	connTimeWheel *TimeWheel //连接管理时间轮
 }
 
 func NewEchoServer(port int) *WebSocketServer {
@@ -37,7 +39,11 @@ func NewServer(port int) *WebSocketServer {
 	server := &WebSocketServer{}
 
 	server.Port = port
-	server.WorkerPool = defaultAntsPool
+	server.WorkerPool = defaultAntsPool //业务处理协程池
+
+	//连接管理时间轮
+	server.connTimeWheel = newTimeWheel(time.Second, int(ConnMaxIdleSeconds), timeWheelJob)
+	//server.connTimeWheel = newTimeWheel(time.Second, ConnMaxIdleSeconds*2, timeWheelJob)
 
 	return server
 }
@@ -45,16 +51,21 @@ func NewServer(port int) *WebSocketServer {
 func (server *WebSocketServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
 	log.Printf("websocket server is listening on %s (multi-cores: %t, loops: %d)\n",
 		srv.Addr.String(), srv.Multicore, srv.NumLoops)
+
+	//运行连接管理
+	server.connTimeWheel.Start()
+	log.Printf("websocket server connTimeWheel start\n")
+
 	return
 }
 
 func (server *WebSocketServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
-	server.ConnNum = server.ConnNum + 1
+	atomic.AddInt64(&server.ConnNum, 1)
 	return
 }
 
 func (server *WebSocketServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
-	server.ConnNum = server.ConnNum - 1
+	atomic.AddInt64(&server.ConnNum, -1)
 	return
 }
 
@@ -80,8 +91,13 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 				log.Printf("react ws 协议升级异常， %v\n", err)
 
 			} else {
-				log.Printf("react ws 协议升级成功\n")
+				log.Printf("react ws 协议升级成功, %s\n", upgraderConn.GnetConn.RemoteAddr().String())
 				upgraderConn.IsSuccessUpgraded = true
+
+				//更新连接活跃时间
+				server.updateConnActiveTs(upgraderConn)
+
+				//cclehui_todo  维护连接id id pool
 			}
 
 		} else {
@@ -101,6 +117,10 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 					case ws.OpPing:
 						log.Printf("ping, message:%v\n", message)
 						wsutil.WriteServerMessage(upgraderConn, ws.OpPong, nil)
+
+						//更新连接活跃时间
+						server.updateConnActiveTs(upgraderConn)
+
 					case ws.OpText:
 						server.WorkerPool.Submit(func() {
 							//具体业务在 worker pool中处理
@@ -108,12 +128,17 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 							handlerParam.OpCode = message.OpCode
 							handlerParam.Request = message.Payload
 							handlerParam.Writer = upgraderConn
+							handlerParam.WSConn = upgraderConn
 							handlerParam.server = server
 
 							server.Handler(handlerParam)
 						})
+
+						//更新连接活跃时间
+						server.updateConnActiveTs(upgraderConn)
+
 					case ws.OpClose:
-						log.Printf("关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
+						log.Printf("client关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
 						//关闭连接
 						ws.WriteFrame(upgraderConn, ws.NewCloseFrame(nil))
 						return nil, gnet.Close
@@ -134,4 +159,17 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 	}
 
 	return
+}
+
+//更新连接活跃时间
+func (server *WebSocketServer) updateConnActiveTs(wsConn *GnetUpgraderConn) {
+
+	now := time.Now().Unix()
+
+	if now-wsConn.LastActiveTs > ConnMaxIdleSeconds {
+		jobParam := &jobParam{server, wsConn}
+		server.connTimeWheel.AddTimer(time.Second*time.Duration(ConnMaxIdleSeconds), nil, jobParam)
+	}
+
+	wsConn.LastActiveTs = now
 }

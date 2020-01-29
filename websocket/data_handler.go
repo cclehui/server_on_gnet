@@ -17,6 +17,8 @@ type DataHandlerParam struct {
 
 	Writer io.Writer
 
+	WSConn *GnetUpgraderConn //升级后的连接
+
 	server *WebSocketServer
 }
 
