@@ -13,6 +13,7 @@ import (
 
 type WebSocketServer struct {
 	*gnet.EventServer
+	IP      string
 	Port    int
 	ConnNum int64
 
@@ -20,6 +21,8 @@ type WebSocketServer struct {
 	WorkerPool *ants.Pool  //业务处理协程池
 
 	connTimeWheel *TimeWheel //连接管理时间轮
+
+	ConnCloseHandler ConnCloseHandleFunc //连接关闭处理
 }
 
 func NewEchoServer(port int) *WebSocketServer {
@@ -38,6 +41,8 @@ func NewServer(port int) *WebSocketServer {
 
 	server := &WebSocketServer{}
 
+	//ip 和端口
+	server.IP = "localhost" //cclehui_test
 	server.Port = port
 	server.WorkerPool = defaultAntsPool //业务处理协程池
 
@@ -93,6 +98,7 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 			} else {
 				log.Printf("react ws 协议升级成功, %s\n", upgraderConn.GnetConn.RemoteAddr().String())
 				upgraderConn.IsSuccessUpgraded = true
+				//upgraderConn.UniqId = int(server.ConnNum) //cclehui
 
 				//更新连接活跃时间
 				server.updateConnActiveTs(upgraderConn)
@@ -129,7 +135,7 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 							handlerParam.Request = message.Payload
 							handlerParam.Writer = upgraderConn
 							handlerParam.WSConn = upgraderConn
-							handlerParam.server = server
+							handlerParam.Server = server
 
 							server.Handler(handlerParam)
 						})
@@ -140,7 +146,8 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 					case ws.OpClose:
 						log.Printf("client关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
 						//关闭连接
-						ws.WriteFrame(upgraderConn, ws.NewCloseFrame(nil))
+						server.closeConn(upgraderConn)
+
 						return nil, gnet.Close
 
 					default:
@@ -173,3 +180,19 @@ func (server *WebSocketServer) updateConnActiveTs(wsConn *GnetUpgraderConn) {
 
 	wsConn.LastActiveTs = now
 }
+
+//关闭连接
+func (server *WebSocketServer) closeConn(wsConn *GnetUpgraderConn) {
+	if wsConn == nil {
+		return
+	}
+
+	ws.WriteFrame(wsConn, ws.NewCloseFrame(nil))
+
+	if server.ConnCloseHandler != nil {
+		server.ConnCloseHandler(wsConn)
+	}
+}
+
+//连接关闭处理函数
+type ConnCloseHandleFunc func(wsConn *GnetUpgraderConn)

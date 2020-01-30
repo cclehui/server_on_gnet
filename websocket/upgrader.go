@@ -14,7 +14,7 @@ import (
 type GnetUpgraderConn struct {
 	GnetConn gnet.Conn
 
-	UniqId int //连接的全局唯一id ?
+	UniqId string //连接的全局唯一id ?
 
 	LastActiveTs int64 //上次活跃的时间 unix 时间戳
 
@@ -24,7 +24,7 @@ type GnetUpgraderConn struct {
 
 //连接超时管理函数
 func timeWheelJob(param *jobParam) {
-	if param == nil || param.wsConn == nil {
+	if param == nil || param.wsConn == nil || param.server == nil {
 		return
 	}
 
@@ -34,12 +34,11 @@ func timeWheelJob(param *jobParam) {
 		//长时间未活跃
 		log.Printf("server关闭连接, 连接空闲%d秒, %v\n", ConnMaxIdleSeconds, param.wsConn)
 		//关闭连接
-		ws.WriteFrame(param.wsConn, ws.NewCloseFrame(nil))
+		param.server.closeConn(param.wsConn)
+
 	} else {
-		if param.server != nil {
-			//进入新的时间循环
-			param.server.connTimeWheel.AddTimer(time.Second*time.Duration((ConnMaxIdleSeconds-diffNow)), nil, param)
-		}
+		//进入新的时间循环
+		param.server.connTimeWheel.AddTimer(time.Second*time.Duration((ConnMaxIdleSeconds-diffNow)), nil, param)
 	}
 
 }

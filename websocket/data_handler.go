@@ -19,7 +19,7 @@ type DataHandlerParam struct {
 
 	WSConn *GnetUpgraderConn //升级后的连接
 
-	server *WebSocketServer
+	Server *WebSocketServer
 }
 
 type DataHandler func(param *DataHandlerParam)
