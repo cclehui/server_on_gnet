@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"errors"
 	"log"
 	"sync/atomic"
 	"time"
@@ -13,8 +14,7 @@ import (
 
 type WebSocketServer struct {
 	*gnet.EventServer
-	IP      string
-	Port    int
+	Addr    string //ip:port
 	ConnNum int64
 
 	Handler    DataHandler //业务处理具体实现
@@ -25,16 +25,16 @@ type WebSocketServer struct {
 	ConnCloseHandler ConnCloseHandleFunc //连接关闭处理
 }
 
-func NewEchoServer(port int) *WebSocketServer {
+func NewEchoServer(addr string) *WebSocketServer {
 
-	server := NewServer(port)
+	server := NewServer(addr)
 
 	server.Handler = EchoDataHandler
 
 	return server
 }
 
-func NewServer(port int) *WebSocketServer {
+func NewServer(addr string) *WebSocketServer {
 
 	options := ants.Options{ExpiryDuration: time.Second * 10, Nonblocking: true}
 	defaultAntsPool, _ := ants.NewPool(DefaultAntsPoolSize, ants.WithOptions(options))
@@ -42,8 +42,9 @@ func NewServer(port int) *WebSocketServer {
 	server := &WebSocketServer{}
 
 	//ip 和端口
-	server.IP = "localhost" //cclehui_test
-	server.Port = port
+	//server.IP = "localhost" //cclehui_test
+	//server.Port = port
+	server.Addr = addr
 	server.WorkerPool = defaultAntsPool //业务处理协程池
 
 	//连接管理时间轮
@@ -166,6 +167,17 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 	}
 
 	return
+}
+
+//发送下行消息
+func (server *WebSocketServer) SendDownStreamMsg(wsConn *GnetUpgraderConn, opcode ws.OpCode, msg []byte) error {
+	if wsConn == nil {
+		return errors.New("SendDownStreamMsg wsConn is nil")
+	}
+
+	server.updateConnActiveTs(wsConn)
+
+	return wsutil.WriteServerMessage(*wsConn, opcode, msg)
 }
 
 //更新连接活跃时间
