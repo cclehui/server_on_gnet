@@ -1,48 +1,18 @@
 package tcp_fixed_head
 
 import (
-	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/panjf2000/ants"
+	"github.com/cclehui/server_on_gnet/commonutil"
+	"github.com/panjf2000/ants/v2"
 	"github.com/panjf2000/gnet"
+	"golang.org/x/net/context"
 )
 
-type HandlerDataType struct {
-	ProtocalData *ProtocalData
-
-	Conn gnet.Conn
-
-	server *TCPFixHeadServer
-}
-type ServerHandler func(handlerData *HandlerDataType)
-
-var defaultHandler ServerHandler = func(handlerData *HandlerDataType) {
-	if handlerData.ProtocalData == nil {
-		return
-	}
-
-	protocal := NewTCPFixHeadProtocal()
-
-	//cclehui_todo
-	switch handlerData.ProtocalData.ActionType {
-	case ACTION_PING:
-		pongData, err := protocal.Encode(ACTION_PONG, nil)
-		if err != nil {
-			log.Printf("server encode pong , %v, err:%v", pongData, err)
-		}
-
-		if handlerData.Conn != nil {
-			handlerData.Conn.AsyncWrite(pongData)
-		}
-
-	}
-
-	log.Printf("服务端收到数据, %v, data:%s\n", handlerData.ProtocalData, string(handlerData.ProtocalData.Data))
-}
-
 func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
-
 	options := ants.Options{ExpiryDuration: time.Second * 10, Nonblocking: true}
 	defaultAntsPool, _ := ants.NewPool(DefaultAntsPoolSize, ants.WithOptions(options))
 
@@ -51,8 +21,41 @@ func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
 	server.Port = port
 	server.WorkerPool = defaultAntsPool
 	server.Handler = defaultHandler
+	server.ctx = context.Background()
 
 	return server
+}
+
+// 启动服务
+func Run(server *TCPFixHeadServer, protoAddr string, opts ...gnet.Option) error {
+	opts = append(opts, gnet.WithCodec(&TCPFixHeadProtocal{}))
+	ctx := context.Background()
+
+	go func() {
+		// 监听系统信号量
+		osSignal := make(chan os.Signal, 1)
+		signal.Notify(osSignal, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
+
+		for {
+			select {
+			case s := <-osSignal:
+				commonutil.GetLogger().Infof(ctx, "收到系统信号:%s", s.String())
+				switch s {
+				case syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT,
+					syscall.SIGHUP:
+					err := gnet.Stop(ctx, protoAddr)
+					if err != nil {
+						commonutil.GetLogger().Errorf(ctx, "Stop error:%+v", err)
+					}
+
+					return
+				default:
+				}
+			}
+		}
+	}()
+
+	return gnet.Serve(server, protoAddr, opts...)
 }
 
 type TCPFixHeadServer struct {
@@ -63,41 +66,65 @@ type TCPFixHeadServer struct {
 	ConnNum int
 
 	Handler ServerHandler
+
+	ctx context.Context
 }
 
 func (tcpfhs *TCPFixHeadServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-	log.Printf("Echo server is listening on %s (multi-cores: %t, loops: %d)\n",
-		srv.Addr.String(), srv.Multicore, srv.NumLoops)
+	commonutil.GetLogger().Infof(tcpfhs.ctx,
+		"server is listening on %s (multi-cores: %t, loops: %d)",
+		srv.Addr.String(), srv.Multicore, srv.NumEventLoop)
 	return
+}
+
+func (tcpfhs *TCPFixHeadServer) OnShutdown(srv gnet.Server) {
+	commonutil.GetLogger().Infof(tcpfhs.ctx, "server shutdown on %s", srv.Addr.String())
 }
 
 func (tcpfhs *TCPFixHeadServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 	tcpfhs.ConnNum = tcpfhs.ConnNum + 1
+	commonutil.GetLogger().Debugf(tcpfhs.ctx, "new connection: %s", c.RemoteAddr())
+
 	return
 }
 
 func (tcpfhs *TCPFixHeadServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 	tcpfhs.ConnNum = tcpfhs.ConnNum - 1
+	commonutil.GetLogger().Debugf(tcpfhs.ctx, "close connection: %s", c.RemoteAddr())
+
 	return
 }
 
-func (tcpfhs *TCPFixHeadServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
+func (tcpfhs *TCPFixHeadServer) PreWrite() {}
 
-	//在 reactor 协程中做解码操作
+func (tcpfhs *TCPFixHeadServer) Tick() (delay time.Duration, action gnet.Action) {
+	return
+}
+
+// 在 reactor 协程中做解码操作
+func (tcpfhs *TCPFixHeadServer) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
 	protocal := NewTCPFixHeadProtocal()
-	protocal.SetGnetConnection(c)
 
-	protocalData, err := protocal.serverDecode()
+	protocalData, err := protocal.DecodeFrame(frame)
+
 	if err != nil {
-		log.Printf("React WorkerPool Decode error :%v\n", err)
+		commonutil.GetLogger().Errorf(tcpfhs.ctx, "React WorkerPool Decode error :%v\n", err)
+
+		return nil, gnet.None
 	}
 
+	if protocalData == nil {
+		return nil, gnet.None
+	}
+
+	// 具体业务在 worker pool中处理
 	tcpfhs.WorkerPool.Submit(func() {
-		//具体业务在 worker pool中处理
-		handlerData := &HandlerDataType{}
+		handlerData := &HandlerContext{}
 		handlerData.ProtocalData = protocalData
 		handlerData.Conn = c
 		handlerData.server = tcpfhs
+		handlerData.frameData = frame
+
 		tcpfhs.Handler(handlerData)
 	})
 	return

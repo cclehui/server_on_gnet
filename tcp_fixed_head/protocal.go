@@ -2,12 +2,14 @@ package tcp_fixed_head
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 
+	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/panjf2000/gnet"
 )
 
@@ -21,85 +23,111 @@ type ProtocalData struct {
 	//Lock       sync.Mutex
 }
 
-type TCPFixHeadProtocal struct {
-	HeadLength int
-	Conn       gnet.Conn
+// 协议头长度
+func (p *ProtocalData) HeadLength() int {
+	return DefaultHeadLength
 }
+
+type TCPFixHeadProtocal struct{}
 
 //new protocal
 func NewTCPFixHeadProtocal() *TCPFixHeadProtocal {
-	return &TCPFixHeadProtocal{HeadLength: DefaultHeadLength}
+	return &TCPFixHeadProtocal{}
 }
 
-func (tcpfhp *TCPFixHeadProtocal) SetGnetConnection(gnetConn gnet.Conn) {
-	tcpfhp.Conn = gnetConn
+func (tcpfhp *TCPFixHeadProtocal) getHeadLength() int {
+	return DefaultHeadLength
 }
 
 // server端 gnet input 数据 decode
-func (tcpfhp *TCPFixHeadProtocal) serverDecode() (*ProtocalData, error) {
-
-	curConContext := tcpfhp.Conn.Context()
+func (tcpfhp *TCPFixHeadProtocal) Decode(c gnet.Conn) ([]byte, error) {
+	curConContext := c.Context()
+	ctx := context.Background()
 
 	if curConContext == nil {
 		//解析协议 header
-		if tempSize, headData := tcpfhp.Conn.ReadN(tcpfhp.HeadLength); tempSize == tcpfhp.HeadLength {
-
-			newConContext := ProtocalData{}
-			//数据长度
-			bytesBuffer := bytes.NewBuffer(headData)
-			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Version)
-			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.ActionType)
-			binary.Read(bytesBuffer, binary.BigEndian, &newConContext.DataLength)
-
-			if newConContext.Version != PROTOCAL_VERSION ||
-				!isCorrectAction(newConContext.ActionType) {
-				//非正常协议数据 重置buffer
-				tcpfhp.Conn.ResetBuffer()
-				return nil, errors.New("not normal protocal data, reset buffer")
-			}
-
-			tcpfhp.Conn.SetContext(newConContext)
-
-		} else {
+		_, headData := c.ReadN(tcpfhp.getHeadLength())
+		if len(headData) != tcpfhp.getHeadLength() {
 			return nil, nil
 		}
+
+		newConContext := ProtocalData{}
+
+		//数据长度
+		bytesBuffer := bytes.NewBuffer(headData)
+		binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Version)
+		binary.Read(bytesBuffer, binary.BigEndian, &newConContext.ActionType)
+		binary.Read(bytesBuffer, binary.BigEndian, &newConContext.DataLength)
+
+		if newConContext.Version != PROTOCAL_VERSION ||
+			!isCorrectAction(newConContext.ActionType) {
+			//非正常协议数据 重置buffer
+			c.ResetBuffer()
+
+			err := errors.New("not normal protocal data, reset buffer")
+			commonutil.GetLogger().Errorf(ctx, "unknow protocal:%+v", err)
+
+			return nil, err
+		}
+
+		c.SetContext(newConContext)
 	}
 
 	//解析协议数据
-	if protocalData, ok := tcpfhp.Conn.Context().(ProtocalData); !ok {
-		tcpfhp.Conn.SetContext(nil)
+	if protocalData, ok := c.Context().(ProtocalData); !ok {
+		c.SetContext(nil)
+		c.ResetBuffer()
+
 		return nil, errors.New("context 数据异常")
-
 	} else {
-		dataLength := int(protocalData.DataLength)
+		tempBufferLength := c.BufferLength() // 当前已有多少数据
+		frameDataLength := tcpfhp.getHeadLength() + int(protocalData.DataLength)
 
-		if dataLength < 1 {
-			tcpfhp.Conn.SetContext(nil)
-			return &protocalData, nil
-		}
-
-		if tempSize, data := tcpfhp.Conn.ReadN(dataLength); tempSize == dataLength {
-			protocalData.Data = data
-
-			tcpfhp.Conn.SetContext(nil)
-			return &protocalData, nil
-
-		} else {
+		if tempBufferLength < frameDataLength {
 			return nil, nil
 		}
+
+		// 数据够了
+		_, data := c.ReadN(frameDataLength)
+
+		c.SetContext(nil)
+		c.ShiftN(frameDataLength) // 前移
+
+		return data, nil
+	}
+}
+
+// 数据反解
+func (tcpfhp *TCPFixHeadProtocal) DecodeFrame(frame []byte) (*ProtocalData, error) {
+	data := &ProtocalData{}
+	//数据长度
+	bytesBuffer := bytes.NewBuffer(frame)
+
+	if err := binary.Read(bytesBuffer, binary.BigEndian, &data.Version); err != nil {
+		return nil, err
 	}
 
-	return nil, nil
+	if err := binary.Read(bytesBuffer, binary.BigEndian, &data.ActionType); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Read(bytesBuffer, binary.BigEndian, &data.DataLength); err != nil {
+		return nil, err
+	}
+
+	data.Data = frame[tcpfhp.getHeadLength():]
+
+	return data, nil
 }
 
 // client 端获取解包后的数据
 func (tcpfhp *TCPFixHeadProtocal) ClientDecode(rawConn net.Conn) (*ProtocalData, error) {
-
 	newPackage := ProtocalData{}
 
-	headData := make([]byte, tcpfhp.HeadLength)
+	headData := make([]byte, tcpfhp.getHeadLength())
+
 	n, err := io.ReadFull(rawConn, headData)
-	if n != tcpfhp.HeadLength {
+	if n != tcpfhp.getHeadLength() {
 		return nil, err
 	}
 
@@ -115,6 +143,7 @@ func (tcpfhp *TCPFixHeadProtocal) ClientDecode(rawConn net.Conn) (*ProtocalData,
 
 	data := make([]byte, newPackage.DataLength)
 	dataNum, err2 := io.ReadFull(rawConn, data)
+
 	if uint32(dataNum) != newPackage.DataLength {
 		return nil, errors.New(fmt.Sprintf("read data error, %v", err2))
 	}
@@ -158,9 +187,12 @@ func (tcpfhp *TCPFixHeadProtocal) EncodeWrite(actionType uint16, data []byte, co
 	return nil
 }
 
-//数据编码
-func (tcpfhp *TCPFixHeadProtocal) Encode(actionType uint16, data []byte) ([]byte, error) {
+func (tcpfhp *TCPFixHeadProtocal) Encode(c gnet.Conn, buf []byte) ([]byte, error) {
+	return buf, nil
+}
 
+//数据编码
+func (tcpfhp *TCPFixHeadProtocal) EncodeData(actionType uint16, data []byte) ([]byte, error) {
 	pdata := ProtocalData{}
 	pdata.Version = PROTOCAL_VERSION
 	pdata.ActionType = actionType

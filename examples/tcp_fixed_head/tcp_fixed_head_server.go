@@ -1,21 +1,21 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/cclehui/server_on_gnet/tcp_fixed_head"
 	"github.com/panjf2000/gnet"
 )
 
-//网络编程
-//tcp server 简单的 固定头部长度协议
-
+// 网络编程
+// tcp server 简单的 固定头部长度协议
 func main() {
 
 	var port int
@@ -27,43 +27,46 @@ func main() {
 	flag.Parse()
 
 	tcpServer := tcp_fixed_head.NewTCPFixHeadServer(port)
+	ctx := context.Background()
 
 	go func() {
 		for {
-			fmt.Println("当前连接数量:", tcpServer.ConnNum)
+			commonutil.GetLogger().Infof(ctx, "当前连接数量:%d", tcpServer.ConnNum)
 
 			time.Sleep(time.Second * 1)
 		}
-
 	}()
 
 	go func() {
 		for i := 0; i < 1; i++ {
 			go func() {
-				tcpFHTestClient(port)
+				tcpFHTestClient(ctx, port)
 			}()
 		}
 	}()
 
-	log.Fatal(gnet.Serve(tcpServer, fmt.Sprintf("tcp://:%d", port), gnet.WithMulticore(multicore)))
+	options := []gnet.Option{gnet.WithReusePort(true), gnet.WithMulticore(multicore)}
 
+	err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
+	if err != nil {
+		commonutil.GetLogger().Errorf(ctx, "启动失败:%+v", err)
+	}
 }
 
 //测试 client
-func tcpFHTestClient(port int) {
-
+func tcpFHTestClient(ctx context.Context, port int) {
 	time.Sleep(time.Second * 3)
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", port))
 	//_, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", port))
 
 	if err != nil {
-		log.Printf("tcpFHTestClient, Dail error:%v\n", err)
+		commonutil.GetLogger().Errorf(ctx, "tcpFHTestClient, Dail error:%v", err)
 	}
 
 	protocal := tcp_fixed_head.NewTCPFixHeadProtocal()
 
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= 3; i++ {
 		//for i := 1; i <= 2; i++ {
 		data := strings.Repeat(strconv.Itoa(i), i)
 		data = data + "abc"
@@ -82,25 +85,23 @@ func tcpFHTestClient(port int) {
 		//protocal.EncodeWrite(tcp_fixed_head.ACTION_PING, []byte(data), conn)
 
 		//返回encode 的数据， 然后发送
-		encodedData, _ := protocal.Encode(tcp_fixed_head.ACTION_PING, []byte(data))
-		fmt.Println("11111,", encodedData)
+		encodedData, _ := protocal.EncodeData(tcp_fixed_head.ACTION_PING, []byte(data))
+		commonutil.GetLogger().Infof(ctx, "client 发送数据,%s", data)
+
 		conn.Write(encodedData)
 
 		time.Sleep(time.Second * 1)
 	}
 
-	for {
+	commonutil.GetLogger().Infof(ctx, "开始获取服务端返回的数据......")
 
+	for {
 		response, err := protocal.ClientDecode(conn)
 
 		if err != nil {
-			log.Printf("获取服务端数据异常, %v\n", err)
+			commonutil.GetLogger().Errorf(ctx, "获取服务端数据异常, %v", err)
 		}
 
-		log.Printf("服务端返回的数据, %v, data:%s\n", response, string(response.Data))
-
+		commonutil.GetLogger().Infof(ctx, "服务端返回的数据, %v, data:%s", response, string(response.Data))
 	}
-
-	time.Sleep(time.Second * 86400)
-
 }
