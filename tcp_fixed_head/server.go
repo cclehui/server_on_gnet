@@ -83,7 +83,7 @@ func (tcpfhs *TCPFixHeadServer) OnShutdown(srv gnet.Server) {
 
 func (tcpfhs *TCPFixHeadServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 	tcpfhs.ConnNum = tcpfhs.ConnNum + 1
-	commonutil.GetLogger().Debugf(tcpfhs.ctx, "new connection: %s", c.RemoteAddr())
+	commonutil.GetLogger().Infof(tcpfhs.ctx, "new connection: %s", c.RemoteAddr())
 
 	return
 }

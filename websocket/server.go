@@ -1,11 +1,14 @@
 package websocket
 
 import (
-	"errors"
+	"context"
 	"log"
 	"sync/atomic"
 	"time"
 
+	"github.com/pkg/errors"
+
+	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"github.com/panjf2000/ants/v2"
@@ -23,6 +26,8 @@ type WebSocketServer struct {
 	connTimeWheel *TimeWheel //连接管理时间轮
 
 	ConnCloseHandler ConnCloseHandleFunc //连接关闭处理
+
+	ctx context.Context
 }
 
 func NewEchoServer(addr string) *WebSocketServer {
@@ -35,7 +40,6 @@ func NewEchoServer(addr string) *WebSocketServer {
 }
 
 func NewServer(addr string) *WebSocketServer {
-
 	options := ants.Options{ExpiryDuration: time.Second * 10, Nonblocking: true}
 	defaultAntsPool, _ := ants.NewPool(DefaultAntsPoolSize, ants.WithOptions(options))
 
@@ -51,34 +55,58 @@ func NewServer(addr string) *WebSocketServer {
 	server.connTimeWheel = newTimeWheel(time.Second, int(ConnMaxIdleSeconds), timeWheelJob)
 	//server.connTimeWheel = newTimeWheel(time.Second, ConnMaxIdleSeconds*2, timeWheelJob)
 
+	server.ctx = context.Background()
+
 	return server
 }
 
 func (server *WebSocketServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-	log.Printf("websocket server is listening on %s (multi-cores: %t, loops: %d)\n",
+	commonutil.GetLogger().Infof(server.ctx, "websocket server is listening on %s (multi-cores: %t, loops: %d)",
 		srv.Addr.String(), srv.Multicore, srv.NumLoops)
 
 	//运行连接管理
 	server.connTimeWheel.Start()
-	log.Printf("websocket server connTimeWheel start\n")
+	commonutil.GetLogger().Infof(server.ctx, "websocket server connTimeWheel start")
 
 	return
 }
 
+func (server *WebSocketServer) OnShutdown(srv gnet.Server) {
+	commonutil.GetLogger().Infof(server.ctx, "server shutdown on %s", srv.Addr.String())
+}
+
 func (server *WebSocketServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 	atomic.AddInt64(&server.ConnNum, 1)
+
+	commonutil.GetLogger().Infof(server.ctx, "new connection: %s", c.RemoteAddr())
+
 	return
 }
 
 func (server *WebSocketServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 	atomic.AddInt64(&server.ConnNum, -1)
+
+	commonutil.GetLogger().Debugf(server.ctx, "close connection: %s", c.RemoteAddr())
+
 	return
 }
 
-func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Action) {
+func (server *WebSocketServer) PreWrite() {}
+
+func (server *WebSocketServer) Tick() (delay time.Duration, action gnet.Action) {
+	return
+}
+
+func (server *WebSocketServer) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+	return
+}
+
+// func (server *WebSocketServer) ReactOld(c gnet.Conn) (out []byte, action gnet.Action) {
+func (server *WebSocketServer) Decode(c gnet.Conn) ([]byte, error) {
 
 	//fmt.Printf("react, 当前全部数据, 1111, %v\n", c.Read())
 	//fmt.Printf("react, 当前全部数据, 2222, %s\n", string(c.Read()))
+	ctx := context.Background()
 
 	if c.Context() == nil {
 		//初始化协议升级器
@@ -87,86 +115,88 @@ func (server *WebSocketServer) React(c gnet.Conn) (out []byte, action gnet.Actio
 		c.SetContext(upgraderConn)
 	}
 
-	if upgraderConn, ok := c.Context().(*GnetUpgraderConn); ok {
+	upgraderConn, ok := c.Context().(*GnetUpgraderConn)
+	if !ok {
+		err := errors.New("react contenxt 数据格式异常")
 
-		if !upgraderConn.IsSuccessUpgraded {
-			//协议升级过程
-			_, err := upgraderConn.Upgrader.Upgrade(upgraderConn)
+		commonutil.GetLogger().Errorf(ctx, "%+v", err)
 
-			if err != nil {
-				log.Printf("react ws 协议升级异常， %v\n", err)
+		return nil, err
+	}
 
-			} else {
-				log.Printf("react ws 协议升级成功, %s\n", upgraderConn.GnetConn.RemoteAddr().String())
-				upgraderConn.IsSuccessUpgraded = true
-				//upgraderConn.UniqId = int(server.ConnNum) //cclehui
+	if !upgraderConn.IsSuccessUpgraded {
+		//协议升级过程
+		_, err := upgraderConn.Upgrader.Upgrade(upgraderConn)
 
-				//更新连接活跃时间
-				server.updateConnActiveTs(upgraderConn)
-
-				//cclehui_todo  维护连接id id pool
-			}
+		if err != nil {
+			commonutil.GetLogger().Errorf(ctx, "react ws 协议升级异常， %+v", err)
 
 		} else {
-			//正常的数据处理过程
+			commonutil.GetLogger().Infof(ctx, "react ws 协议升级成功, %s", upgraderConn.GnetConn.RemoteAddr().String())
+			upgraderConn.IsSuccessUpgraded = true
+			//upgraderConn.UniqId = int(server.ConnNum) //cclehui
 
-			//在 reactor 协程中做解码操作
-			//msg, op, err := wsutil.ReadClientData(upgraderConn)
-			//frame, err := ws.ReadFrame(upgraderConn)
-			messages, err := wsutil.ReadClientMessage(upgraderConn, nil)
+			//更新连接活跃时间
+			server.updateConnActiveTs(upgraderConn)
 
-			if err == nil {
-				//log.Printf("本次收到的消息, op:%v,  msg:%v\n", op, msg)
-
-				for _, message := range messages {
-
-					switch message.OpCode {
-					case ws.OpPing:
-						log.Printf("ping, message:%v\n", message)
-						wsutil.WriteServerMessage(upgraderConn, ws.OpPong, nil)
-
-						//更新连接活跃时间
-						server.updateConnActiveTs(upgraderConn)
-
-					case ws.OpText:
-						server.WorkerPool.Submit(func() {
-							//具体业务在 worker pool中处理
-							handlerParam := &DataHandlerParam{}
-							handlerParam.OpCode = message.OpCode
-							handlerParam.Request = message.Payload
-							handlerParam.Writer = upgraderConn
-							handlerParam.WSConn = upgraderConn
-							handlerParam.Server = server
-
-							server.Handler(handlerParam)
-						})
-
-						//更新连接活跃时间
-						server.updateConnActiveTs(upgraderConn)
-
-					case ws.OpClose:
-						log.Printf("client关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
-						//关闭连接
-						server.closeConn(upgraderConn)
-
-						return nil, gnet.Close
-
-					default:
-						log.Printf("操作暂不支持, message:%v,  error:%v\n", message)
-					}
-				}
-
-			} else {
-				log.Printf("本次收到的消息不完整, message:%v,  error:%v\n", messages, err)
-			}
-
+			//cclehui_todo  维护连接id id pool
 		}
 
 	} else {
-		log.Println("react contenxt 数据格式异常")
-	}
+		//正常的数据处理过程
 
-	return
+		//在 reactor 协程中做解码操作
+		//msg, op, err := wsutil.ReadClientData(upgraderConn)
+		//frame, err := ws.ReadFrame(upgraderConn)
+		messages, err := wsutil.ReadClientMessage(upgraderConn, nil)
+
+		if err == nil {
+			//log.Printf("本次收到的消息, op:%v,  msg:%v\n", op, msg)
+
+			for _, message := range messages {
+
+				switch message.OpCode {
+				case ws.OpPing:
+					commonutil.GetLogger().Infof(ctx, "ping, message:%v", message)
+					wsutil.WriteServerMessage(upgraderConn, ws.OpPong, nil)
+
+					//更新连接活跃时间
+					server.updateConnActiveTs(upgraderConn)
+
+				case ws.OpText:
+					server.WorkerPool.Submit(func() {
+						//具体业务在 worker pool中处理
+						handlerParam := &DataHandlerParam{}
+
+						handlerParam.OpCode = message.OpCode
+						handlerParam.Request = message.Payload
+						handlerParam.Writer = upgraderConn
+						handlerParam.WSConn = upgraderConn
+						handlerParam.Server = server
+
+						server.Handler(handlerParam)
+					})
+
+					//更新连接活跃时间
+					server.updateConnActiveTs(upgraderConn)
+
+				case ws.OpClose:
+					log.Printf("client关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
+					//关闭连接
+					server.closeConn(upgraderConn)
+
+					return nil, gnet.Close
+
+				default:
+					log.Printf("操作暂不支持, message:%v,  error:%v\n", message)
+				}
+			}
+
+		} else {
+			log.Printf("本次收到的消息不完整, message:%v,  error:%v\n", messages, err)
+		}
+
+	}
 }
 
 //发送下行消息
