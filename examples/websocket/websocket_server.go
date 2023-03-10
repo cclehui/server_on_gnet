@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cclehui/server_on_gnet/websocket"
-	"github.com/panjf2000/gnet"
+	"github.com/panjf2000/gnet/v2"
 )
 
 func wsHome(w http.ResponseWriter, r *http.Request) {

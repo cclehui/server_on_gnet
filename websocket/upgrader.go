@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gobwas/ws"
-	"github.com/panjf2000/gnet"
+	"github.com/panjf2000/gnet/v2"
 )
 
 //协议升级, conn处理 业务层conn

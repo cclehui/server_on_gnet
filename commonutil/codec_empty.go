@@ -1,7 +1,7 @@
 package commonutil
 
 import (
-	"github.com/panjf2000/gnet"
+	"github.com/panjf2000/gnet/v2"
 )
 
 type CodecEmpty struct{}

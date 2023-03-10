@@ -3,16 +3,15 @@ package tcp_fixed_head
 import (
 	"time"
 
-	"github.com/panjf2000/gnet"
+	"github.com/panjf2000/gnet/v2"
 )
 
 type HandlerContext struct {
-	ProtocalData *ProtocalData
+	ProtocolData *ProtocolData
 
 	Conn gnet.Conn
 
-	server    *TCPFixHeadServer
-	frameData []byte
+	server *TCPFixHeadServer
 }
 
 func (ctx *HandlerContext) Deadline() (deadline time.Time, ok bool) {

@@ -11,7 +11,7 @@ import (
 
 	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/cclehui/server_on_gnet/tcp_fixed_head"
-	"github.com/panjf2000/gnet"
+	"github.com/panjf2000/gnet/v2"
 )
 
 // 网络编程
@@ -38,7 +38,7 @@ func main() {
 	}()
 
 	go func() {
-		for i := 0; i < 1; i++ {
+		for i := 0; i < 4; i++ {
 			go func() {
 				tcpFHTestClient(ctx, port)
 			}()
@@ -53,7 +53,7 @@ func main() {
 	}
 }
 
-//测试 client
+// 测试 client
 func tcpFHTestClient(ctx context.Context, port int) {
 	time.Sleep(time.Second * 3)
 
@@ -64,7 +64,7 @@ func tcpFHTestClient(ctx context.Context, port int) {
 		commonutil.GetLogger().Errorf(ctx, "tcpFHTestClient, Dail error:%v", err)
 	}
 
-	protocal := tcp_fixed_head.NewTCPFixHeadProtocal()
+	protocol := tcp_fixed_head.NewTCPFixHeadProtocol()
 
 	for i := 1; i <= 3; i++ {
 		//for i := 1; i <= 2; i++ {
@@ -85,7 +85,7 @@ func tcpFHTestClient(ctx context.Context, port int) {
 		//protocal.EncodeWrite(tcp_fixed_head.ACTION_PING, []byte(data), conn)
 
 		//返回encode 的数据， 然后发送
-		encodedData, _ := protocal.EncodeData(tcp_fixed_head.ACTION_PING, []byte(data))
+		encodedData, _ := protocol.EncodeData(tcp_fixed_head.ACTION_PING, []byte(data))
 		commonutil.GetLogger().Infof(ctx, "client 发送数据,%s", data)
 
 		conn.Write(encodedData)
@@ -96,7 +96,7 @@ func tcpFHTestClient(ctx context.Context, port int) {
 	commonutil.GetLogger().Infof(ctx, "开始获取服务端返回的数据......")
 
 	for {
-		response, err := protocal.ClientDecode(conn)
+		response, err := protocol.ClientDecode(conn)
 
 		if err != nil {
 			commonutil.GetLogger().Errorf(ctx, "获取服务端数据异常, %v", err)

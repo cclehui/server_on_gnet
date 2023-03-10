@@ -3,12 +3,13 @@ package tcp_fixed_head
 import (
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/panjf2000/ants/v2"
-	"github.com/panjf2000/gnet"
+	"github.com/panjf2000/gnet/v2"
 	"golang.org/x/net/context"
 )
 
@@ -28,7 +29,6 @@ func NewTCPFixHeadServer(port int) *TCPFixHeadServer {
 
 // 启动服务
 func Run(server *TCPFixHeadServer, protoAddr string, opts ...gnet.Option) error {
-	opts = append(opts, gnet.WithCodec(&TCPFixHeadProtocal{}))
 	ctx := context.Background()
 
 	go func() {
@@ -55,77 +55,75 @@ func Run(server *TCPFixHeadServer, protoAddr string, opts ...gnet.Option) error 
 		}
 	}()
 
-	return gnet.Serve(server, protoAddr, opts...)
+	return gnet.Run(server, protoAddr, opts...)
 }
 
 type TCPFixHeadServer struct {
-	*gnet.EventServer
 	Port       int
 	WorkerPool *ants.Pool
 
-	ConnNum int
+	ConnNum int32
 
 	Handler ServerHandler
 
 	ctx context.Context
 }
 
-func (tcpfhs *TCPFixHeadServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-	commonutil.GetLogger().Infof(tcpfhs.ctx,
-		"server is listening on %s (multi-cores: %t, loops: %d)",
-		srv.Addr.String(), srv.Multicore, srv.NumEventLoop)
+func (tcphs *TCPFixHeadServer) OnBoot(eng gnet.Engine) (action gnet.Action) {
+	commonutil.GetLogger().Infof(tcphs.ctx, "server started.....")
 	return
 }
 
-func (tcpfhs *TCPFixHeadServer) OnShutdown(srv gnet.Server) {
-	commonutil.GetLogger().Infof(tcpfhs.ctx, "server shutdown on %s", srv.Addr.String())
+func (tcphs *TCPFixHeadServer) OnShutdown(eng gnet.Engine) {
+	commonutil.GetLogger().Infof(tcphs.ctx, "server shutdown...... ")
 }
 
-func (tcpfhs *TCPFixHeadServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
-	tcpfhs.ConnNum = tcpfhs.ConnNum + 1
-	commonutil.GetLogger().Infof(tcpfhs.ctx, "new connection: %s", c.RemoteAddr())
-
-	return
-}
-
-func (tcpfhs *TCPFixHeadServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
-	tcpfhs.ConnNum = tcpfhs.ConnNum - 1
-	commonutil.GetLogger().Debugf(tcpfhs.ctx, "close connection: %s", c.RemoteAddr())
+func (tcphs *TCPFixHeadServer) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
+	totalNum := atomic.AddInt32(&tcphs.ConnNum, 1)
+	commonutil.GetLogger().Infof(tcphs.ctx,
+		"total connection:%d, new connection: %s", totalNum, c.RemoteAddr())
 
 	return
 }
 
-func (tcpfhs *TCPFixHeadServer) PreWrite() {}
+func (tcphs *TCPFixHeadServer) OnClose(c gnet.Conn, err error) (action gnet.Action) {
+	atomic.AddInt32(&tcphs.ConnNum, -1)
+	commonutil.GetLogger().Debugf(tcphs.ctx, "close connection: %s", c.RemoteAddr())
 
-func (tcpfhs *TCPFixHeadServer) Tick() (delay time.Duration, action gnet.Action) {
+	return
+}
+
+func (tcphs *TCPFixHeadServer) OnTick() (delay time.Duration, action gnet.Action) {
 	return
 }
 
 // 在 reactor 协程中做解码操作
-func (tcpfhs *TCPFixHeadServer) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-	protocal := NewTCPFixHeadProtocal()
+func (tcphs *TCPFixHeadServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
+	protocol := NewTCPFixHeadProtocol()
 
-	protocalData, err := protocal.DecodeFrame(frame)
+	protocolData, err := protocol.Decode(c)
 
 	if err != nil {
-		commonutil.GetLogger().Errorf(tcpfhs.ctx, "React WorkerPool Decode error :%v\n", err)
+		if err == ErrIncompletePacket {
+			return gnet.None
+		}
+		commonutil.GetLogger().Errorf(tcphs.ctx, "React WorkerPool Decode error :%v\n", err)
 
-		return nil, gnet.None
+		return gnet.Close // 关闭连接
 	}
 
-	if protocalData == nil {
-		return nil, gnet.None
+	if protocolData == nil {
+		return gnet.None
 	}
 
 	// 具体业务在 worker pool中处理
-	tcpfhs.WorkerPool.Submit(func() {
+	tcphs.WorkerPool.Submit(func() {
 		handlerData := &HandlerContext{}
-		handlerData.ProtocalData = protocalData
+		handlerData.ProtocolData = protocolData
 		handlerData.Conn = c
-		handlerData.server = tcpfhs
-		handlerData.frameData = frame
+		handlerData.server = tcphs
 
-		tcpfhs.Handler(handlerData)
+		tcphs.Handler(handlerData)
 	})
 	return
 }
