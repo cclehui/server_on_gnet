@@ -16,7 +16,6 @@ import (
 )
 
 type WebSocketServer struct {
-	*gnet.EventServer
 	Addr    string //ip:port
 	ConnNum int64
 
@@ -46,8 +45,6 @@ func NewServer(addr string) *WebSocketServer {
 	server := &WebSocketServer{}
 
 	//ip 和端口
-	//server.IP = "localhost" //cclehui_test
-	//server.Port = port
 	server.Addr = addr
 	server.WorkerPool = defaultAntsPool //业务处理协程池
 
@@ -60,9 +57,8 @@ func NewServer(addr string) *WebSocketServer {
 	return server
 }
 
-func (server *WebSocketServer) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-	commonutil.GetLogger().Infof(server.ctx, "websocket server is listening on %s (multi-cores: %t, loops: %d)",
-		srv.Addr.String(), srv.Multicore, srv.NumLoops)
+func (server *WebSocketServer) OnBoot(eng gnet.Engine) (action gnet.Action) {
+	commonutil.GetLogger().Infof(server.ctx, "websocket server is listening on %s ", server.Addr)
 
 	//运行连接管理
 	server.connTimeWheel.Start()
@@ -71,19 +67,20 @@ func (server *WebSocketServer) OnInitComplete(srv gnet.Server) (action gnet.Acti
 	return
 }
 
-func (server *WebSocketServer) OnShutdown(srv gnet.Server) {
-	commonutil.GetLogger().Infof(server.ctx, "server shutdown on %s", srv.Addr.String())
+func (server *WebSocketServer) OnShutdown(eng gnet.Engine) {
+	commonutil.GetLogger().Infof(server.ctx, "server shutdown on %s", server.Addr)
 }
 
-func (server *WebSocketServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
-	atomic.AddInt64(&server.ConnNum, 1)
+func (server *WebSocketServer) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
+	totalNum := atomic.AddInt64(&server.ConnNum, 1)
 
-	commonutil.GetLogger().Infof(server.ctx, "new connection: %s", c.RemoteAddr())
+	commonutil.GetLogger().Infof(server.ctx,
+		"total connection:%d, new connection: %s", totalNum, c.RemoteAddr())
 
 	return
 }
 
-func (server *WebSocketServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
+func (server *WebSocketServer) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 	atomic.AddInt64(&server.ConnNum, -1)
 
 	commonutil.GetLogger().Debugf(server.ctx, "close connection: %s", c.RemoteAddr())
@@ -91,9 +88,7 @@ func (server *WebSocketServer) OnClosed(c gnet.Conn, err error) (action gnet.Act
 	return
 }
 
-func (server *WebSocketServer) PreWrite() {}
-
-func (server *WebSocketServer) Tick() (delay time.Duration, action gnet.Action) {
+func (server *WebSocketServer) OnTick() (delay time.Duration, action gnet.Action) {
 	return
 }
 
@@ -101,9 +96,7 @@ func (server *WebSocketServer) React(frame []byte, c gnet.Conn) (out []byte, act
 	return
 }
 
-// func (server *WebSocketServer) ReactOld(c gnet.Conn) (out []byte, action gnet.Action) {
-func (server *WebSocketServer) Decode(c gnet.Conn) ([]byte, error) {
-
+func (server *WebSocketServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	//fmt.Printf("react, 当前全部数据, 1111, %v\n", c.Read())
 	//fmt.Printf("react, 当前全部数据, 2222, %s\n", string(c.Read()))
 	ctx := context.Background()
@@ -117,11 +110,11 @@ func (server *WebSocketServer) Decode(c gnet.Conn) ([]byte, error) {
 
 	upgraderConn, ok := c.Context().(*GnetUpgraderConn)
 	if !ok {
-		err := errors.New("react contenxt 数据格式异常")
+		err := errors.New("react context 数据格式异常")
 
 		commonutil.GetLogger().Errorf(ctx, "%+v", err)
 
-		return nil, err
+		return gnet.None
 	}
 
 	if !upgraderConn.IsSuccessUpgraded {
@@ -130,6 +123,7 @@ func (server *WebSocketServer) Decode(c gnet.Conn) ([]byte, error) {
 
 		if err != nil {
 			commonutil.GetLogger().Errorf(ctx, "react ws 协议升级异常， %+v", err)
+			return gnet.Close
 
 		} else {
 			commonutil.GetLogger().Infof(ctx, "react ws 协议升级成功, %s", upgraderConn.GnetConn.RemoteAddr().String())
@@ -185,7 +179,7 @@ func (server *WebSocketServer) Decode(c gnet.Conn) ([]byte, error) {
 					//关闭连接
 					server.closeConn(upgraderConn)
 
-					return nil, gnet.Close
+					return gnet.Close
 
 				default:
 					log.Printf("操作暂不支持, message:%v,  error:%v\n", message)
@@ -195,11 +189,12 @@ func (server *WebSocketServer) Decode(c gnet.Conn) ([]byte, error) {
 		} else {
 			log.Printf("本次收到的消息不完整, message:%v,  error:%v\n", messages, err)
 		}
-
 	}
+
+	return gnet.None
 }
 
-//发送下行消息
+// 发送下行消息
 func (server *WebSocketServer) SendDownStreamMsg(wsConn *GnetUpgraderConn, opcode ws.OpCode, msg []byte) error {
 	if wsConn == nil {
 		return errors.New("SendDownStreamMsg wsConn is nil")
@@ -210,7 +205,7 @@ func (server *WebSocketServer) SendDownStreamMsg(wsConn *GnetUpgraderConn, opcod
 	return wsutil.WriteServerMessage(*wsConn, opcode, msg)
 }
 
-//更新连接活跃时间
+// 更新连接活跃时间
 func (server *WebSocketServer) updateConnActiveTs(wsConn *GnetUpgraderConn) {
 
 	now := time.Now().Unix()
@@ -223,7 +218,7 @@ func (server *WebSocketServer) updateConnActiveTs(wsConn *GnetUpgraderConn) {
 	wsConn.LastActiveTs = now
 }
 
-//关闭连接
+// 关闭连接
 func (server *WebSocketServer) closeConn(wsConn *GnetUpgraderConn) {
 	if wsConn == nil {
 		return
@@ -236,5 +231,5 @@ func (server *WebSocketServer) closeConn(wsConn *GnetUpgraderConn) {
 	}
 }
 
-//连接关闭处理函数
+// 连接关闭处理函数
 type ConnCloseHandleFunc func(wsConn *GnetUpgraderConn)

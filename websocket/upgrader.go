@@ -6,11 +6,13 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/gobwas/ws"
 	"github.com/panjf2000/gnet/v2"
+	"golang.org/x/net/context"
 )
 
-//协议升级, conn处理 业务层conn
+// 协议升级, conn处理 业务层conn
 type GnetUpgraderConn struct {
 	GnetConn gnet.Conn
 
@@ -22,7 +24,7 @@ type GnetUpgraderConn struct {
 	Upgrader          ws.Upgrader
 }
 
-//连接超时管理函数
+// 连接超时管理函数
 func timeWheelJob(param *jobParam) {
 	if param == nil || param.wsConn == nil || param.server == nil {
 		return
@@ -32,7 +34,8 @@ func timeWheelJob(param *jobParam) {
 
 	if diffNow > ConnMaxIdleSeconds {
 		//长时间未活跃
-		log.Printf("server关闭连接, 连接空闲%d秒, %v\n", ConnMaxIdleSeconds, param.wsConn)
+		commonutil.GetLogger().Infof(context.Background(),
+			"server关闭连接, 连接空闲%d秒, %v\n", ConnMaxIdleSeconds, param.wsConn)
 		//关闭连接
 		param.server.closeConn(param.wsConn)
 
@@ -45,17 +48,19 @@ func timeWheelJob(param *jobParam) {
 
 // 读数据 这里为什么没用 *GnetUpgraderConn ?
 func (u GnetUpgraderConn) Read(b []byte) (n int, err error) {
+	return u.GnetConn.Read(b)
 
+	/* gnet v2 已兼容reader
 	targetLength := len(b)
 	if targetLength < 1 {
 		return 0, nil
 	}
 
-	if u.GnetConn.BufferLength() >= targetLength {
+	if u.GnetConn.InboundBuffered() >= targetLength {
 		//buffer中数据够
-		curNum, realData := u.GnetConn.ReadN(targetLength)
+		realData, _ := u.GnetConn.Next(targetLength)
 
-		n = curNum
+		n = len(realData)
 
 		copy(b, realData) //数据拷贝
 
@@ -70,23 +75,25 @@ func (u GnetUpgraderConn) Read(b []byte) (n int, err error) {
 	}
 
 	return n, nil
+	*/
 }
 
-//写数据 这里为什么没用 *GnetUpgraderConn ?
+// 写数据 这里为什么没用 *GnetUpgraderConn ?
 func (u GnetUpgraderConn) Write(b []byte) (n int, err error) {
+	return u.GnetConn.Write(b)
 
-	u.GnetConn.AsyncWrite(b)
-
-	return len(b), nil
+	// gnet v2 已兼容writer
+	// u.GnetConn.AsyncWrite(b)
+	// return len(b), nil
 }
 
-//更新连接活跃时间到当前时间
+// 更新连接活跃时间到当前时间
 func (u *GnetUpgraderConn) UpdateActiveTsToNow() {
 	u.LastActiveTs = time.Now().Unix()
 
 }
 
-//默认的协议升级类
+// 默认的协议升级类
 func NewDefaultUpgrader(conn gnet.Conn) *GnetUpgraderConn {
 	return &GnetUpgraderConn{
 		GnetConn: conn,
@@ -110,10 +117,10 @@ var header = ws.HandshakeHeaderHTTP(http.Header{
 	"X-Go-Version-CCLehui": []string{runtime.Version()},
 })
 
-//空的协议升级类
+// 空的协议升级类
 var emptyUpgrader = ws.Upgrader{}
 
-//默认的协议升级处理类
+// 默认的协议升级处理类
 var defaultUpgrader = ws.Upgrader{
 	OnHost: func(host []byte) error {
 		if string(host) == "github.com" {

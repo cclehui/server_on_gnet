@@ -3,7 +3,7 @@ module github.com/cclehui/server_on_gnet
 go 1.19
 
 require (
-	github.com/gobwas/ws v1.0.2
+	github.com/gobwas/ws v1.1.0
 	github.com/golang/protobuf v1.3.2
 	github.com/panjf2000/ants/v2 v2.4.8
 	github.com/panjf2000/gnet/v2 v2.2.0
@@ -13,7 +13,7 @@ require (
 )
 
 require (
-	github.com/gobwas/httphead v0.0.0-20180130184737-2c6c146eadee // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect

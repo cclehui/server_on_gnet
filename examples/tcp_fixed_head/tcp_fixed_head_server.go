@@ -46,7 +46,11 @@ func main() {
 		}
 	}()
 
-	options := []gnet.Option{gnet.WithReusePort(true), gnet.WithMulticore(multicore)}
+	options := []gnet.Option{
+		gnet.WithReusePort(true),
+		gnet.WithMulticore(multicore),
+		gnet.WithTCPKeepAlive(time.Second * 90),
+	}
 
 	err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
 	if err != nil {
