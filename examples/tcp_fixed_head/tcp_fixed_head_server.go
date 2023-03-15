@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"net"
@@ -71,13 +72,11 @@ func tcpFHTestClient(ctx context.Context, port int) {
 		data := strings.Repeat(strconv.Itoa(i), i)
 		data = data + "abc"
 
-		/*
-			if i == 2 {
-				badData := []byte("xxx")
-				err2 := binary.Write(conn, binary.BigEndian, badData)
-				fmt.Println("发送干扰数据, ", err2)
-			}
-		*/
+		if i == 2 {
+			badData := []byte("xxx")
+			err2 := binary.Write(conn, binary.BigEndian, badData)
+			fmt.Println("发送干扰数据, ", err2)
+		}
 
 		//fmt.Println("发送数据\t", data)
 
@@ -96,12 +95,15 @@ func tcpFHTestClient(ctx context.Context, port int) {
 	commonutil.GetLogger().Infof(ctx, "开始获取服务端返回的数据......")
 
 	for {
+		time.Sleep(time.Second * 1)
 		response, err := protocol.ClientDecode(conn)
 
 		if err != nil {
 			commonutil.GetLogger().Errorf(ctx, "获取服务端数据异常, %v", err)
+			continue
 		}
 
 		commonutil.GetLogger().Infof(ctx, "服务端返回的数据, %v, data:%s", response, string(response.Data))
+
 	}
 }

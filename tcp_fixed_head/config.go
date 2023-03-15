@@ -23,7 +23,7 @@ const (
 
 )
 
-var ErrProtocolVersion = errors.New("PROTOCOL_VERSION error close")
+var ErrProtocolVersion = errors.New("PROTOCOL_VERSION error")
 var ErrIncompletePacket = errors.New("incomplete packet")
 var ErrContext = errors.New("context error")
 

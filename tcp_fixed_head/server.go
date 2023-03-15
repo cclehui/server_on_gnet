@@ -107,7 +107,7 @@ func (tcphs *TCPFixHeadServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 		if err == ErrIncompletePacket {
 			return gnet.None
 		}
-		commonutil.GetLogger().Errorf(tcphs.ctx, "React WorkerPool Decode error :%v\n", err)
+		commonutil.GetLogger().Errorf(tcphs.ctx, "Protocol Decode error :%+v\n", err)
 
 		return gnet.Close // 关闭连接
 	}

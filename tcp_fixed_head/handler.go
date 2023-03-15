@@ -1,6 +1,8 @@
 package tcp_fixed_head
 
 import (
+	"fmt"
+
 	"github.com/cclehui/server_on_gnet/commonutil"
 	"github.com/panjf2000/gnet/v2"
 )
@@ -17,7 +19,8 @@ var defaultHandler ServerHandler = func(ctx *HandlerContext) {
 
 	switch ctx.ProtocolData.ActionType {
 	case ACTION_PING:
-		pongData, err := protocol.EncodeData(ACTION_PONG, []byte("pong"))
+		pongData, err := protocol.EncodeData(ACTION_PONG,
+			[]byte(fmt.Sprintf("pong, %s", string(ctx.ProtocolData.Data))))
 		if err != nil {
 			commonutil.GetLogger().Infof(ctx, "server encode pong , %v, err:%v", pongData, err)
 		}
