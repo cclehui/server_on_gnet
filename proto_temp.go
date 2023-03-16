@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/cclehui/server_on_gnet/protobuf"
+	"github.com/cclehui/server_on_gnet/grpc/protobuf"
 	"github.com/golang/protobuf/proto"
 )
 
