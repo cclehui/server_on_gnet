@@ -3,13 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"runtime"
 	"strconv"
 	"time"
 
-	"github.com/cclehui/server_on_gnet/protobuf"
+	"github.com/cclehui/server_on_gnet/grpc/protobuf"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -73,8 +74,62 @@ func startGrpcServer() {
 }
 
 func main() {
+	go func() { // client
+		time.Sleep(time.Second * 2)
+
+		clientTest()
+	}()
 
 	//启动 grpc server
 	startGrpcServer()
+}
 
+/*******************/
+func clientTest() {
+	serverPort := ":50051"
+
+	serverAddress := fmt.Sprintf("localhost%v", serverPort)
+
+	/*
+		keepaliveParam := keepalive.ClientParameters{}
+		keepaliveParam.Time = time.Second * 10
+		keepaliveParam.Timeout = time.Second * 2
+		keepaliveParam.PermitWithoutStream = true
+	*/
+	var kacp = keepalive.ClientParameters{
+		Time:                10 * time.Second, // send pings every 10 seconds if there is no activity
+		Timeout:             time.Second,      // wait 1 second for ping ack before considering the connection dead
+		PermitWithoutStream: true,             // send pings even without active streams
+	}
+
+	conn, err := grpc.Dial(serverAddress, grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
+	if err != nil {
+		log.Printf("连接服务端失败, %v\n", err)
+		return
+	}
+
+	log.Printf("连接服务端成功, %v\n", conn.Target())
+	defer conn.Close()
+
+	for i := 1; i < 4; i++ {
+		go func(num int) {
+			name := fmt.Sprintf("cclehui_%d", num)
+			for {
+				client := protobuf.NewGreeterClient(conn)
+
+				request := &protobuf.HelloRequest{Name: name}
+
+				reply, err2 := client.SayHello(context.Background(), request)
+
+				if err2 != nil {
+					log.Printf("client:%d, 调用rpc方法失败, %v\n", num, err2)
+					return
+				}
+
+				log.Printf("client:%d, 调用rpc方法成功, server reply:%v\n", num, reply.GetMessage())
+				time.Sleep(time.Second * 1)
+			}
+		}(i)
+	}
+	select {}
 }
