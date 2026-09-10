@@ -2,7 +2,7 @@
 
 A Go library of ready-to-use server implementations built on top of the
 [gnet](https://github.com/panjf2000/gnet/v2) event-driven networking framework.
-Module path: `github.com/cclehui/server_on_gnet`, Go 1.19.
+Module path: `github.com/cclehui/server_on_gnet`, Go 1.20.
 
 ## High-Level Design
 

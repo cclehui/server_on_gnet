@@ -4,7 +4,7 @@
 
 `server_on_gnet` — Go library of reusable server implementations built on the
 **gnet** (`github.com/panjf2000/gnet/v2`) event-driven networking framework.
-Module: `github.com/cclehui/server_on_gnet`, Go 1.19.
+Module: `github.com/cclehui/server_on_gnet`, Go 1.20.
 
 ## Architecture
 
