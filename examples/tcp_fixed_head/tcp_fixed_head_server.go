@@ -22,7 +22,7 @@ func main() {
 	var port int
 	var multicore bool
 
-	// Example command: go run main.go --port 2333 --multicore true
+	// Example command: go run tcp_fixed_head_server.go --port 2333 --multicore true
 	flag.IntVar(&port, "port", 5000, "server port")
 	flag.BoolVar(&multicore, "multicore", true, "multicore")
 	flag.Parse()
@@ -103,8 +103,9 @@ func tcpFHTestClient(ctx context.Context, port int) {
 		response, err := protocol.ClientDecode(conn)
 
 		if err != nil {
+			// EOF / 连接被服务端关闭(比如协议错误)后连接已不可用, 退出读取循环
 			commonutil.GetLogger().Errorf(ctx, "获取服务端数据异常, %v", err)
-			continue
+			return
 		}
 
 		commonutil.GetLogger().Infof(ctx, "服务端返回的数据, %v, data:%s", response, string(response.Data))

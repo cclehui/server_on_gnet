@@ -101,29 +101,28 @@ func (tcphs *TCPFixHeadServer) OnTick() (delay time.Duration, action gnet.Action
 func (tcphs *TCPFixHeadServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	protocol := NewTCPFixHeadProtocol()
 
-	protocolData, err := protocol.Decode(c)
+	// 一次 OnTraffic 里缓冲区可能存在多个完整包(粘包), 必须循环解包直到数据不足,
+	// 否则缓冲区里的旧包要等下一次 OnTraffic 才被处理, 表现为响应"滞后一包"
+	for {
+		protocolData, err := protocol.Decode(c)
 
-	if err != nil {
-		if err == ErrIncompletePacket {
-			return gnet.None
+		if err != nil {
+			if err == ErrIncompletePacket {
+				return gnet.None // 半包, 保留上下文等待后续数据
+			}
+			commonutil.GetLogger().Errorf(tcphs.ctx, "Protocol Decode error :%v", err)
+
+			return gnet.Close // 协议错误, 关闭连接
 		}
-		commonutil.GetLogger().Errorf(tcphs.ctx, "Protocol Decode error :%+v\n", err)
 
-		return gnet.Close // 关闭连接
+		// 具体业务在 worker pool中处理
+		tcphs.WorkerPool.Submit(func() {
+			handlerData := &HandlerContext{}
+			handlerData.ProtocolData = protocolData
+			handlerData.Conn = c
+			handlerData.server = tcphs
+
+			tcphs.Handler(handlerData)
+		})
 	}
-
-	if protocolData == nil {
-		return gnet.None
-	}
-
-	// 具体业务在 worker pool中处理
-	tcphs.WorkerPool.Submit(func() {
-		handlerData := &HandlerContext{}
-		handlerData.ProtocolData = protocolData
-		handlerData.Conn = c
-		handlerData.server = tcphs
-
-		tcphs.Handler(handlerData)
-	})
-	return
 }
