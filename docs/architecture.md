@@ -20,7 +20,9 @@ All gnet-based servers follow the same core pattern:
    users inject their own business logic.
 4. **Lifecycle callbacks** — each server implements the `gnet.EventHandle`
    interface: `OnBoot` / `OnShutdown` / `OnOpen` / `OnClose` / `OnTraffic` /
-   `OnTick`, and tracks live connections with an atomic counter (`ConnNum`).
+   `OnTick`, and tracks live connections with an atomic counter (`ConnNum`,
+   mutated with `atomic.AddInt32` — read it through `GetConnNum()`; reading the
+   field directly is a data race).
 
 ```
  client ──TCP──► gnet reactor ──decode──► ants worker pool ──► business Handler
@@ -56,14 +58,19 @@ Wire format, 8-byte big-endian header + variable body:
 | Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | Data [DataLength]byte |
 ```
 
-- `config.go`: constants — `DefaultHeadLength=8`, `PROTOCOL_VERSION=0x8001`,
-  actions `ACTION_PING=0x0001` / `ACTION_PONG=0x0002` / `ACTION_DATA=0x00F0`;
-  sentinel errors `ErrIncompletePacket` (keep buffering), `ErrProtocolVersion`,
-  `ErrContext`.
+- `config.go`: constants — `DefaultHeadLength=8`, `MaxDataLength=16MiB`,
+  `PROTOCOL_VERSION=0x8001`, actions `ACTION_PING=0x0001` /
+  `ACTION_PONG=0x0002` / `ACTION_DATA=0x00F0`; sentinel errors
+  `ErrIncompletePacket` (keep buffering), `ErrProtocolVersion`,
+  `ErrUnknownAction`, `ErrDataLengthExceeded`, `ErrContext`.
 - `protocal.go`: `TCPFixHeadProtocol` —
   - `Decode(gnet.Conn)`: server-side streaming decode; partial frames return
     `ErrIncompletePacket` → handler returns `gnet.None` to wait for more data;
-    invalid header → `gnet.Close`.
+    invalid header → `gnet.Close`. Bad version / unknown action / oversized
+    `DataLength` are rejected before any state is stored, so a corrupt stream
+    can never park a connection in "waiting for a body that will never come".
+    Zero-length bodies skip `Conn.Next` entirely — `Next(n<=0)` means "read the
+    whole buffer" in gnet and would swallow the next pipelined frame.
   - `EncodeData` / `EncodeWrite`: frame encoding; `ClientDecode(net.Conn)`:
     blocking client-side decode using `io.ReadFull`.
 - `server.go`: `TCPFixHeadServer` (implements `gnet.EventHandle`) + `Run()`
@@ -111,8 +118,8 @@ kept as learning material for the "pb protocol over gnet" TODO.
 ## Running the Examples
 
 ```bash
-# fixed-head TCP echo server (default port 5000) + 4 built-in test clients
-go run ./examples/tcp_fixed_head --port 5000 --multicore=true
+# fixed-head TCP echo server (default port 7001) + 4 built-in test clients
+go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 
 # WebSocket server on :8081 plus an HTTP page on :8080 to drive a browser client
 go run ./examples/websocket

@@ -40,58 +40,88 @@ func (tcpfhp *TCPFixHeadProtocol) getHeadLength() int {
 
 // server端 gnet input 数据 decode
 func (tcpfhp *TCPFixHeadProtocol) Decode(c gnet.Conn) (*ProtocolData, error) {
-	curConContext := c.Context()
+	headLength := tcpfhp.getHeadLength()
 
-	if curConContext == nil {
-		//解析协议 header
-		tempBufferLength := c.InboundBuffered()        // 当前已有多少数据
-		if tempBufferLength < tcpfhp.getHeadLength() { // 不够头长度
+	var protocolData *ProtocolData
+
+	if ctx := c.Context(); ctx != nil {
+		parsed, ok := ctx.(*ProtocolData)
+		if !ok {
+			c.SetContext(nil)
+			return nil, ErrContext
+		}
+
+		protocolData = parsed
+	}
+
+	if protocolData == nil {
+		// 解析协议 header
+		if c.InboundBuffered() < headLength { // 不够头长度
 			return nil, ErrIncompletePacket
 		}
 
-		headData, _ := c.Next(tcpfhp.getHeadLength())
+		headData, err := c.Next(headLength)
+		if err != nil {
+			return nil, err
+		}
 
-		newConContext := &ProtocolData{}
+		protocolData = &ProtocolData{}
 
 		//数据长度
 		bytesBuffer := bytes.NewBuffer(headData)
-		binary.Read(bytesBuffer, binary.BigEndian, &newConContext.Version)
-		binary.Read(bytesBuffer, binary.BigEndian, &newConContext.ActionType)
-		binary.Read(bytesBuffer, binary.BigEndian, &newConContext.DataLength)
+		if err := binary.Read(bytesBuffer, binary.BigEndian, &protocolData.Version); err != nil {
+			return nil, err
+		}
 
-		if newConContext.Version != PROTOCOL_VERSION ||
-			!isCorrectAction(newConContext.ActionType) { //非正常协议数据
+		if err := binary.Read(bytesBuffer, binary.BigEndian, &protocolData.ActionType); err != nil {
+			return nil, err
+		}
+
+		if err := binary.Read(bytesBuffer, binary.BigEndian, &protocolData.DataLength); err != nil {
+			return nil, err
+		}
+
+		if protocolData.Version != PROTOCOL_VERSION { //非正常协议数据
 			return nil, ErrProtocolVersion
 		}
 
-		c.SetContext(newConContext)
+		if !isCorrectAction(protocolData.ActionType) {
+			return nil, ErrUnknownAction
+		}
+
+		// DataLength 是 uint32, 不校验上限会让一条伪造的小包头把连接挂在等数据状态;
+		// 且在 32 位平台上转 int 会溢出成负数
+		if protocolData.DataLength > MaxDataLength {
+			return nil, ErrDataLengthExceeded
+		}
+
+		c.SetContext(protocolData)
 	}
 
 	//解析协议数据
-	if protocolData, ok := c.Context().(*ProtocolData); !ok {
-		c.SetContext(nil)
+	frameDataLength := int(protocolData.DataLength)
 
-		return nil, ErrContext
-	} else {
-		tempBufferLength := c.InboundBuffered() // 当前已有多少数据
-		frameDataLength := int(protocolData.DataLength)
+	if c.InboundBuffered() < frameDataLength {
+		return nil, ErrIncompletePacket
+	}
 
-		if tempBufferLength < frameDataLength {
-			return nil, ErrIncompletePacket
+	// 注意: gnet 的 Next(n) 在 n <= 0 时表示"把缓冲区里的数据全部读出来",
+	// 零长 body 必须先跳过, 否则会把同一缓冲里的下一个包一起吃掉
+	if frameDataLength > 0 {
+		data, err := c.Next(frameDataLength)
+		if err != nil {
+			return nil, err
 		}
 
-		// 数据够了
-		data, _ := c.Next(frameDataLength)
-
-		copyData := make([]byte, frameDataLength) // 复制
+		copyData := make([]byte, len(data)) // 复制, 不能引用 gnet 复用的缓冲区
 		copy(copyData, data)
 
 		protocolData.Data = copyData
-
-		c.SetContext(nil)
-
-		return protocolData, nil
 	}
+
+	c.SetContext(nil)
+
+	return protocolData, nil
 }
 
 // 数据反解
@@ -124,15 +154,30 @@ func (tcpfhp *TCPFixHeadProtocol) ClientDecode(rawConn net.Conn) (*ProtocolData,
 	headData := make([]byte, tcpfhp.getHeadLength())
 
 	n, err := io.ReadFull(rawConn, headData)
-	if n != tcpfhp.getHeadLength() {
+	if err != nil {
 		return nil, err
+	}
+	if n != tcpfhp.getHeadLength() {
+		return nil, errors.New(fmt.Sprintf("read head error, want %d, got %d", tcpfhp.getHeadLength(), n))
 	}
 
 	//数据长度
 	bytesBuffer := bytes.NewBuffer(headData)
-	binary.Read(bytesBuffer, binary.BigEndian, &newPackage.Version)
-	binary.Read(bytesBuffer, binary.BigEndian, &newPackage.ActionType)
-	binary.Read(bytesBuffer, binary.BigEndian, &newPackage.DataLength)
+	if err := binary.Read(bytesBuffer, binary.BigEndian, &newPackage.Version); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Read(bytesBuffer, binary.BigEndian, &newPackage.ActionType); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Read(bytesBuffer, binary.BigEndian, &newPackage.DataLength); err != nil {
+		return nil, err
+	}
+
+	if newPackage.DataLength > MaxDataLength {
+		return nil, ErrDataLengthExceeded
+	}
 
 	if newPackage.DataLength < 1 {
 		return &newPackage, nil

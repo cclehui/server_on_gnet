@@ -57,6 +57,11 @@ func NewServer(addr string) *WebSocketServer {
 	return server
 }
 
+// 当前连接数, 理由同 tcp_fixed_head.TCPFixHeadServer.GetConnNum
+func (server *WebSocketServer) GetConnNum() int64 {
+	return atomic.LoadInt64(&server.ConnNum)
+}
+
 func (server *WebSocketServer) OnBoot(eng gnet.Engine) (action gnet.Action) {
 	commonutil.GetLogger().Infof(server.ctx, "websocket server is listening on %s ", server.Addr)
 

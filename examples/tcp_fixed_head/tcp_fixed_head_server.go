@@ -17,13 +17,14 @@ import (
 
 // 网络编程
 // tcp server 简单的 固定头部长度协议
+// go run examples/tcp_fixed_head/tcp_fixed_head_server.go
 func main() {
 
 	var port int
 	var multicore bool
 
 	// Example command: go run tcp_fixed_head_server.go --port 2333 --multicore true
-	flag.IntVar(&port, "port", 5000, "server port")
+	flag.IntVar(&port, "port", 7001, "server port")
 	flag.BoolVar(&multicore, "multicore", true, "multicore")
 	flag.Parse()
 
@@ -32,7 +33,7 @@ func main() {
 
 	go func() {
 		for {
-			commonutil.GetLogger().Infof(ctx, "当前连接数量:%d", tcpServer.ConnNum)
+			commonutil.GetLogger().Infof(ctx, "当前连接数量:%d", tcpServer.GetConnNum())
 
 			time.Sleep(time.Second * 1)
 		}
@@ -66,8 +67,12 @@ func tcpFHTestClient(ctx context.Context, port int) {
 	//_, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", port))
 
 	if err != nil {
+		// 之前只打日志不 return, conn 为 nil, 后面 conn.Write 会 panic
 		commonutil.GetLogger().Errorf(ctx, "tcpFHTestClient, Dail error:%v", err)
+		return
 	}
+
+	defer conn.Close()
 
 	protocol := tcp_fixed_head.NewTCPFixHeadProtocol()
 
@@ -88,10 +93,18 @@ func tcpFHTestClient(ctx context.Context, port int) {
 		//protocal.EncodeWrite(tcp_fixed_head.ACTION_PING, []byte(data), conn)
 
 		//返回encode 的数据， 然后发送
-		encodedData, _ := protocol.EncodeData(tcp_fixed_head.ACTION_PING, []byte(data))
+		encodedData, err := protocol.EncodeData(tcp_fixed_head.ACTION_PING, []byte(data))
+		if err != nil {
+			commonutil.GetLogger().Errorf(ctx, "client encode error:%v", err)
+			return
+		}
+
 		commonutil.GetLogger().Infof(ctx, "client 发送数据,%s", data)
 
-		conn.Write(encodedData)
+		if _, err := conn.Write(encodedData); err != nil {
+			commonutil.GetLogger().Errorf(ctx, "client write error:%v", err)
+			return
+		}
 
 		time.Sleep(time.Second * 1)
 	}

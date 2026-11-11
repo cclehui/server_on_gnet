@@ -30,7 +30,7 @@ func main() {
 
 		go func() {
 			for {
-				fmt.Println("当前连接数量:", tcpServer.ConnNum)
+				fmt.Println("当前连接数量:", tcpServer.GetConnNum())
 
 				time.Sleep(time.Second * 2)
 			}

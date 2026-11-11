@@ -69,6 +69,12 @@ type TCPFixHeadServer struct {
 	ctx context.Context
 }
 
+// 当前连接数。ConnNum 是被 reactor 协程用 atomic 修改的, 外部读取必须走这个
+// 方法, 直接读字段会和 atomic.AddInt32 构成 data race
+func (tcphs *TCPFixHeadServer) GetConnNum() int32 {
+	return atomic.LoadInt32(&tcphs.ConnNum)
+}
+
 func (tcphs *TCPFixHeadServer) OnBoot(eng gnet.Engine) (action gnet.Action) {
 	commonutil.GetLogger().Infof(tcphs.ctx, "server started.....")
 	return
