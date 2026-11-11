@@ -78,6 +78,10 @@ Wire format, 8-byte big-endian header + variable body:
   `gnet.Stop`) for graceful shutdown.
 - `handler_context.go`: `HandlerContext` carries `ProtocolData`, `gnet.Conn`,
   and the server, and implements `context.Context` so handlers can log with it.
+- Log convention: every log line from this package is prefixed with `[server]`,
+  and the client-side example logs use `[client-N]`, so you can `grep 'server]'`
+  or `grep 'client-'` to separate the two sides of a conversation. `ActionName`
+  turns an `ActionType` into `PING` / `PONG` / `DATA` for readable logs.
 - `handler.go`: `defaultHandler` answers `ACTION_PING` with an `ACTION_PONG`
   frame written back via `Conn.AsyncWrite`.
 
@@ -119,8 +123,8 @@ kept as learning material for the "pb protocol over gnet" TODO.
 
 ```bash
 # fixed-head TCP PING/PONG server (default port 7001) + 4 built-in test clients.
-# The demo is a guided scenario: prints the wire format up front, prefixes every
-# line with [client-N] / [server], and has client-2 deliberately inject 3 junk
+# The demo is a guided scenario: prints the wire format up front, tags every log
+# line with [server] or [client-N], and has client-2 deliberately inject 3 junk
 # bytes so you can watch the server reject the frame and close that connection.
 go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 

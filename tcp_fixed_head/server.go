@@ -39,13 +39,13 @@ func Run(server *TCPFixHeadServer, protoAddr string, opts ...gnet.Option) error 
 		for {
 			select {
 			case s := <-osSignal:
-				commonutil.GetLogger().Infof(ctx, "收到系统信号:%s", s.String())
+				commonutil.GetLogger().Infof(ctx, "[server] 收到系统信号:%s", s.String())
 				switch s {
 				case syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT,
 					syscall.SIGHUP:
 					err := gnet.Stop(ctx, protoAddr)
 					if err != nil {
-						commonutil.GetLogger().Errorf(ctx, "Stop error:%+v", err)
+						commonutil.GetLogger().Errorf(ctx, "[server] Stop error:%+v", err)
 					}
 
 					return
@@ -76,25 +76,25 @@ func (tcphs *TCPFixHeadServer) GetConnNum() int32 {
 }
 
 func (tcphs *TCPFixHeadServer) OnBoot(eng gnet.Engine) (action gnet.Action) {
-	commonutil.GetLogger().Infof(tcphs.ctx, "server started.....")
+	commonutil.GetLogger().Infof(tcphs.ctx, "[server] server started")
 	return
 }
 
 func (tcphs *TCPFixHeadServer) OnShutdown(eng gnet.Engine) {
-	commonutil.GetLogger().Infof(tcphs.ctx, "server shutdown...... ")
+	commonutil.GetLogger().Infof(tcphs.ctx, "[server] server shutdown")
 }
 
 func (tcphs *TCPFixHeadServer) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 	totalNum := atomic.AddInt32(&tcphs.ConnNum, 1)
 	commonutil.GetLogger().Infof(tcphs.ctx,
-		"total connection:%d, new connection: %s", totalNum, c.RemoteAddr())
+		"[server] 连接数=%d, 新连接: %s", totalNum, c.RemoteAddr())
 
 	return
 }
 
 func (tcphs *TCPFixHeadServer) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 	atomic.AddInt32(&tcphs.ConnNum, -1)
-	commonutil.GetLogger().Debugf(tcphs.ctx, "close connection: %s", c.RemoteAddr())
+	commonutil.GetLogger().Debugf(tcphs.ctx, "[server] 关闭连接: %s", c.RemoteAddr())
 
 	return
 }
@@ -116,7 +116,7 @@ func (tcphs *TCPFixHeadServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 			if err == ErrIncompletePacket {
 				return gnet.None // 半包, 保留上下文等待后续数据
 			}
-			commonutil.GetLogger().Errorf(tcphs.ctx, "Protocol Decode error :%v", err)
+			commonutil.GetLogger().Errorf(tcphs.ctx, "[server] 解包失败, 关闭连接: %v", err)
 
 			return gnet.Close // 协议错误, 关闭连接
 		}

@@ -64,8 +64,18 @@ func main() {
 	go func() {
 		wg.Wait()
 		commonutil.GetLogger().Infof(ctx,
-			"[server] 演示结束: %d 个客户端均已退出, 当前连接数=%d (client-2 是被协议校验主动断开的)",
-			len(clients), tcpServer.GetConnNum())
+			"[server] 演示结束: %d 个客户端均已退出 (client-2 是被协议校验主动断开的)", len(clients))
+
+		// client 侧 Close() 返回不代表 server 侧 OnClose 已经跑完, 这里等连接真正回收
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+			if tcpServer.GetConnNum() == 0 {
+				break
+			}
+
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		commonutil.GetLogger().Infof(ctx, "[server] 连接已全部回收, 当前连接数=%d", tcpServer.GetConnNum())
 	}()
 
 	options := []gnet.Option{
@@ -89,8 +99,8 @@ func printBanner(port int) {
 	fmt.Println("客户端:")
 	fmt.Println("  client-1 / 3 / 4 : 正常发送 3 个 PING, 预期各收到 3 个 PONG")
 	fmt.Println("  client-2         : 第 2 步前插入 3 字节非法数据, 预期被服务端断开")
-	fmt.Println("下面是结构化日志: 带 [client-N] / [server] 前缀的来自本示例,")
-	fmt.Println("没有前缀的 (total connection / close connection / [gnet]) 来自 gnet 运行时")
+	fmt.Println("下面是结构化日志: [server] 是服务端, [client-N] 是第 N 个客户端")
+	fmt.Println("用 grep 'server]' 只看服务端, grep 'client-' 只看客户端")
 	fmt.Println("================================================================")
 }
 
@@ -150,8 +160,8 @@ func demoHandler(hctx *tcp_fixed_head.HandlerContext) {
 	protocol := tcp_fixed_head.NewTCPFixHeadProtocol()
 	peer := peerName(hctx.Conn)
 
-	commonutil.GetLogger().Infof(hctx, "[server] 收到 %s from %s data=%q",
-		actionName(hctx.ProtocolData.ActionType), peer, string(hctx.ProtocolData.Data))
+	commonutil.GetLogger().Infof(hctx, "[server] 收到 %s, from:%s, data:%q",
+		tcp_fixed_head.ActionName(hctx.ProtocolData.ActionType), peer, string(hctx.ProtocolData.Data))
 
 	if hctx.ProtocolData.ActionType != tcp_fixed_head.ACTION_PING || hctx.Conn == nil {
 		return
@@ -160,16 +170,16 @@ func demoHandler(hctx *tcp_fixed_head.HandlerContext) {
 	pongData, err := protocol.EncodeData(tcp_fixed_head.ACTION_PONG,
 		[]byte(fmt.Sprintf("pong, %s", string(hctx.ProtocolData.Data))))
 	if err != nil {
-		commonutil.GetLogger().Errorf(hctx, "[server] 编码 PONG 失败: %v", err)
+		commonutil.GetLogger().Errorf(hctx, "[server] 编码 PONG 失败, err:%v", err)
 		return
 	}
 
 	if err := hctx.Conn.AsyncWrite(pongData, func(c gnet.Conn, err error) error { return nil }); err != nil {
-		commonutil.GetLogger().Errorf(hctx, "[server] 回写 PONG 失败: %v", err)
+		commonutil.GetLogger().Errorf(hctx, "[server] 回写 PONG 失败, err:%v", err)
 		return
 	}
 
-	commonutil.GetLogger().Infof(hctx, "[server] 回复 PONG to %s", peer)
+	commonutil.GetLogger().Infof(hctx, "[server] 回复 PONG, to:%s", peer)
 }
 
 const packetsPerClient = 3
@@ -206,7 +216,7 @@ func (c demoClient) run(ctx context.Context) {
 	defer conn.Close()
 
 	registerPeer(conn.LocalAddr(), c.name)
-	logf("已连接, 本地端口 %s", conn.LocalAddr())
+	logf("client 已连接, 本地端口 %s", conn.LocalAddr())
 
 	protocol := tcp_fixed_head.NewTCPFixHeadProtocol()
 
@@ -232,7 +242,7 @@ func (c demoClient) run(ctx context.Context) {
 			return
 		}
 
-		logf("第 %d/%d 步: 发送 PING data=%q (整帧 %d 字节)", i, packetsPerClient, data, len(frame))
+		logf("第 %d/%d 步: client 发送 PING, data=%q, 整帧 %d 字节", i, packetsPerClient, data, len(frame))
 
 		if _, err := conn.Write(frame); err != nil {
 			c.reportDisconnect(logf, i, err)
@@ -248,7 +258,7 @@ func (c demoClient) run(ctx context.Context) {
 			return
 		}
 
-		logf("第 %d/%d 步: 收到 %s", i, packetsPerClient, formatFrame(resp))
+		logf("第 %d/%d 步: client 收到 %s", i, packetsPerClient, formatFrame(resp))
 
 		time.Sleep(time.Second)
 	}
@@ -287,18 +297,5 @@ func dialWithRetry(port int) (net.Conn, error) {
 // 把帧打印成一行可读的字段, 而不是 %v 打出来的结构体和字节切片
 func formatFrame(p *tcp_fixed_head.ProtocolData) string {
 	return fmt.Sprintf("version=0x%04X action=%s len=%d data=%q",
-		p.Version, actionName(p.ActionType), p.DataLength, string(p.Data))
-}
-
-func actionName(actionType uint16) string {
-	switch actionType {
-	case tcp_fixed_head.ACTION_PING:
-		return "PING"
-	case tcp_fixed_head.ACTION_PONG:
-		return "PONG"
-	case tcp_fixed_head.ACTION_DATA:
-		return "DATA"
-	default:
-		return fmt.Sprintf("UNKNOWN(0x%04X)", actionType)
-	}
+		p.Version, tcp_fixed_head.ActionName(p.ActionType), p.DataLength, string(p.Data))
 }

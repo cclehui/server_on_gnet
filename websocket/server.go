@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"context"
-	"log"
 	"sync/atomic"
 	"time"
 
@@ -63,24 +62,24 @@ func (server *WebSocketServer) GetConnNum() int64 {
 }
 
 func (server *WebSocketServer) OnBoot(eng gnet.Engine) (action gnet.Action) {
-	commonutil.GetLogger().Infof(server.ctx, "websocket server is listening on %s ", server.Addr)
+	commonutil.GetLogger().Infof(server.ctx, "[server] websocket server 监听在 %s", server.Addr)
 
 	//运行连接管理
 	server.connTimeWheel.Start()
-	commonutil.GetLogger().Infof(server.ctx, "websocket server connTimeWheel start")
+	commonutil.GetLogger().Infof(server.ctx, "[server] websocket 连接管理时间轮已启动")
 
 	return
 }
 
 func (server *WebSocketServer) OnShutdown(eng gnet.Engine) {
-	commonutil.GetLogger().Infof(server.ctx, "server shutdown on %s", server.Addr)
+	commonutil.GetLogger().Infof(server.ctx, "[server] websocket server shutdown on %s", server.Addr)
 }
 
 func (server *WebSocketServer) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 	totalNum := atomic.AddInt64(&server.ConnNum, 1)
 
 	commonutil.GetLogger().Infof(server.ctx,
-		"total connection:%d, new connection: %s", totalNum, c.RemoteAddr())
+		"[server] 连接数=%d, 新连接: %s", totalNum, c.RemoteAddr())
 
 	return
 }
@@ -88,7 +87,7 @@ func (server *WebSocketServer) OnOpen(c gnet.Conn) (out []byte, action gnet.Acti
 func (server *WebSocketServer) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 	atomic.AddInt64(&server.ConnNum, -1)
 
-	commonutil.GetLogger().Debugf(server.ctx, "close connection: %s", c.RemoteAddr())
+	commonutil.GetLogger().Debugf(server.ctx, "[server] 关闭连接: %s", c.RemoteAddr())
 
 	return
 }
@@ -117,7 +116,7 @@ func (server *WebSocketServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	if !ok {
 		err := errors.New("react context 数据格式异常")
 
-		commonutil.GetLogger().Errorf(ctx, "%+v", err)
+		commonutil.GetLogger().Errorf(ctx, "[server] react context 数据格式异常: %+v", err)
 
 		return gnet.None
 	}
@@ -127,11 +126,11 @@ func (server *WebSocketServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 		_, err := upgraderConn.Upgrader.Upgrade(upgraderConn)
 
 		if err != nil {
-			commonutil.GetLogger().Errorf(ctx, "react ws 协议升级异常， %+v", err)
+			commonutil.GetLogger().Errorf(ctx, "[server] ws 协议升级异常: %+v", err)
 			return gnet.Close
 
 		} else {
-			commonutil.GetLogger().Infof(ctx, "react ws 协议升级成功, %s", upgraderConn.GnetConn.RemoteAddr().String())
+			commonutil.GetLogger().Infof(ctx, "[server] ws 协议升级成功, from:%s", upgraderConn.GnetConn.RemoteAddr().String())
 			upgraderConn.IsSuccessUpgraded = true
 			//upgraderConn.UniqId = int(server.ConnNum) //cclehui
 
@@ -156,13 +155,17 @@ func (server *WebSocketServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 
 				switch message.OpCode {
 				case ws.OpPing:
-					commonutil.GetLogger().Infof(ctx, "ping, message:%v", message)
+					commonutil.GetLogger().Infof(ctx, "[server] 收到 PING, from:%s, message:%v",
+						upgraderConn.GnetConn.RemoteAddr(), message)
 					wsutil.WriteServerMessage(upgraderConn, ws.OpPong, nil)
 
 					//更新连接活跃时间
 					server.updateConnActiveTs(upgraderConn)
 
 				case ws.OpText:
+					commonutil.GetLogger().Infof(ctx, "[server] 收到 TEXT, from:%s, payload:%q",
+						upgraderConn.GnetConn.RemoteAddr(), string(message.Payload))
+
 					server.WorkerPool.Submit(func() {
 						//具体业务在 worker pool中处理
 						handlerParam := &DataHandlerParam{}
@@ -180,19 +183,22 @@ func (server *WebSocketServer) OnTraffic(c gnet.Conn) (action gnet.Action) {
 					server.updateConnActiveTs(upgraderConn)
 
 				case ws.OpClose:
-					log.Printf("client关闭连接, Payload:%s,  error:%v\n", string(message.Payload), nil)
+					commonutil.GetLogger().Infof(ctx, "[server] 收到客户端 CLOSE, from:%s, payload:%q",
+						upgraderConn.GnetConn.RemoteAddr(), string(message.Payload))
 					//关闭连接
 					server.closeConn(upgraderConn)
 
 					return gnet.Close
 
 				default:
-					log.Printf("操作暂不支持, message:%v,  error:%v\n", message)
+					commonutil.GetLogger().Infof(ctx, "[server] 收到暂不支持的 opcode:%v, from:%s, message:%v",
+						message.OpCode, upgraderConn.GnetConn.RemoteAddr(), message)
 				}
 			}
 
 		} else {
-			log.Printf("本次收到的消息不完整, message:%v,  error:%v\n", messages, err)
+			commonutil.GetLogger().Errorf(ctx, "[server] 读取客户端消息失败, from:%s, message:%v, err:%v",
+				upgraderConn.GnetConn.RemoteAddr(), messages, err)
 		}
 	}
 
