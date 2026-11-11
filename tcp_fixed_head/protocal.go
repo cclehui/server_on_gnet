@@ -81,18 +81,23 @@ func (tcpfhp *TCPFixHeadProtocol) Decode(c gnet.Conn) (*ProtocolData, error) {
 			return nil, err
 		}
 
+		// 错误信息里带上实际收到的值和期望值, 否则日志只有一句
+		// "PROTOCOL_VERSION error", 分不清是对端发错、还是流已经错位
 		if protocolData.Version != PROTOCOL_VERSION { //非正常协议数据
-			return nil, ErrProtocolVersion
+			return nil, fmt.Errorf("%w: got version=0x%04X action=0x%04X, want version=0x%04X",
+				ErrProtocolVersion, protocolData.Version, protocolData.ActionType, PROTOCOL_VERSION)
 		}
 
 		if !isCorrectAction(protocolData.ActionType) {
-			return nil, ErrUnknownAction
+			return nil, fmt.Errorf("%w: got action=0x%04X, want one of 0x%04X/0x%04X/0x%04X",
+				ErrUnknownAction, protocolData.ActionType, ACTION_PING, ACTION_PONG, ACTION_DATA)
 		}
 
 		// DataLength 是 uint32, 不校验上限会让一条伪造的小包头把连接挂在等数据状态;
 		// 且在 32 位平台上转 int 会溢出成负数
 		if protocolData.DataLength > MaxDataLength {
-			return nil, ErrDataLengthExceeded
+			return nil, fmt.Errorf("%w: got %d bytes, max %d",
+				ErrDataLengthExceeded, protocolData.DataLength, MaxDataLength)
 		}
 
 		c.SetContext(protocolData)

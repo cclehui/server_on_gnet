@@ -118,7 +118,10 @@ kept as learning material for the "pb protocol over gnet" TODO.
 ## Running the Examples
 
 ```bash
-# fixed-head TCP echo server (default port 7001) + 4 built-in test clients
+# fixed-head TCP PING/PONG server (default port 7001) + 4 built-in test clients.
+# The demo is a guided scenario: prints the wire format up front, prefixes every
+# line with [client-N] / [server], and has client-2 deliberately inject 3 junk
+# bytes so you can watch the server reject the frame and close that connection.
 go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 
 # WebSocket server on :8081 plus an HTTP page on :8080 to drive a browser client
