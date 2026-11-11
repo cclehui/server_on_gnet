@@ -41,6 +41,7 @@ All gnet-based servers follow the same core pattern:
 | `grpc/` | Standalone gRPC + protobuf demo (not gnet-based, reference code) |
 | `examples/` | Runnable demos with test clients for both server types |
 | root (`proto_temp.go`) | Protobuf marshal/unmarshal scratch demo |
+| `harness/` | Coding style + repo knowledge for agents/contributors |
 
 ### commonutil
 
@@ -128,12 +129,38 @@ kept as learning material for the "pb protocol over gnet" TODO.
 # bytes so you can watch the server reject the frame and close that connection.
 go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 
-# WebSocket server on :8081 plus an HTTP page on :8080 to drive a browser client
+# WebSocket server on :8081 plus an HTTP page on :8080 to drive a browser client.
+# The page template hard-codes ws://192.168.126.139:8081 -- edit wsHome in the
+# example (or use any ws client) if your host differs. :8080 must be free.
 go run ./examples/websocket
 ```
 
 Common gnet options used by examples: `WithReusePort(true)`,
 `WithMulticore(true)`, `WithTCPKeepAlive(90s)`.
+
+## Known Limitations
+
+Recorded so they are not mistaken for intended behavior. Details and the fix
+direction live in `harness/knowledge/websocket.md`. All of them are on the
+WebSocket side; the TCP fixed-head decoder does not share them.
+
+- **WebSocket reads are not resumable.** `gnet.Conn.Read` is non-blocking, so a
+  frame split across two TCP segments makes `wsutil.ReadClientMessage` fail
+  mid-frame; the bytes already consumed are lost and that connection's stream
+  is desynchronized. Reproduced locally by writing a masked text frame in two
+  halves — the server logs `short buffer` and never answers; plain loopback
+  echo also fails intermittently (measured 1 and 3 failures out of 12).
+- **WebSocket downlink writes happen off the event loop.** `EchoDataHandler`
+  and `SendDownStreamMsg` call `wsutil.WriteServerMessage` → `Conn.Write` from
+  an ants worker, although gnet documents `Write` as event-loop-only.
+  `go run -race` against concurrent echo clients reports the resulting
+  data race (`GnetUpgraderConn.Write` vs `updateConnActiveTs`). The safe
+  path is to encode with `ws.WriteFrame` into a buffer, then hand that buffer
+  to `Conn.AsyncWrite`.
+- **No read size limit, origin check, auth, or subprotocol negotiation** on the
+  ws server; the TCP server caps a frame at 16 MiB.
+- `.golangci.yml` is a copied config: the linter is not installed and several
+  enabled linters no longer exist upstream. Formatting is `gofmt`/`goimports`.
 
 ## Extension Points / Conventions
 
@@ -149,5 +176,11 @@ Common gnet options used by examples: `WithReusePort(true)`,
 
 ## Quality Tooling
 
-`.golangci.yml` configures linting (go vet, errcheck-style checks); no test
-files exist yet in the repo.
+`gofmt -l .`, `go vet ./...`, and `go build ./...` are the checks that run
+here; `go test ./...` currently reports "no test files" for every package
+(there are no unit tests). `.golangci.yml` is a copied config for an older
+`golangci-lint` and is not runnable as-is (not installed, several linters
+removed upstream) — do not modernize it as a side effect of another change.
+Verification for protocol changes is running the matching example and reading
+its `[server]` / `[client-N]` log lines; see
+`harness/knowledge/testing.md`.

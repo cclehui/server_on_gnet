@@ -19,7 +19,8 @@ err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
 ```
 
 ## websocket server
-./examples/websocket/websocket_server.go 中是具体的使用demo
+./examples/websocket/websocket_server.go 中是具体的使用demo, 页面里的 ws 地址是按示例机器
+硬编码的(`ws://192.168.126.139:8081`), 换机器时改 `wsHome` 或直接用任意 ws 客户端连 `ws://localhost:8081`
 
 websocket 协议是基于 https://github.com/gobwas/ws 这个库解析的，
 
@@ -36,6 +37,15 @@ options := []gnet.Option{
 log.Fatal(gnet.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...))
 
 ```
+
+## 文档
+
+- 协作与验证约束：[AGENTS.md](./AGENTS.md)
+- 编码规范：[harness/coding_style.md](./harness/coding_style.md)
+- 架构与模型：[harness/knowledge/architecture.md](./harness/knowledge/architecture.md)、[docs/architecture.md](./docs/architecture.md)
+- 协议细节：[harness/knowledge/tcp_fixed_head.md](./harness/knowledge/tcp_fixed_head.md)、[harness/knowledge/websocket.md](./harness/knowledge/websocket.md)
+- 日志约定：[harness/knowledge/logging.md](./harness/knowledge/logging.md)
+- 验证方式：[harness/knowledge/testing.md](./harness/knowledge/testing.md)
 
 ## todo
 1. mqtt协议
