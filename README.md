@@ -13,9 +13,10 @@
 go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 
 # WebSocket: ws 服务端 :8081 + 浏览器测试页面 :8080(打开 http://localhost:8080)
+# 默认只监听本机(localhost); 要让别的机器访问传 --ip 0.0.0.0
 go run ./examples/websocket
-# 也可以换端口
-go run ./examples/websocket --ws-port 9081 --http-port 9080
+# 也可以换地址和端口
+go run ./examples/websocket --ip 0.0.0.0 --ws-port 9081 --http-port 9080
 
 # 脚本化 WebSocket 客户端: echo 往返、跨 TCP 分片的帧、并发连接,
 # 每条连接都会打印 CONNECT/OPEN/SEND/RECV/DONE/CLOSE, 失败时以非 0 退出码结束
@@ -50,7 +51,8 @@ err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
 
 示例同时起两个监听, 所以有两个端口: ws 服务(gnet, 只处理 websocket, 默认 8081)和
 普通 http 页面服务(只吐测试页面, 默认 8080). gnet 不是 http.Server, 页面必须由另一个
-http 服务提供; 浏览器打开 http://localhost:8080 即可, 页面会自己去连 8081
+http 服务提供; 浏览器打开 http://localhost:8080 即可, 页面会自己去连 8081.
+两个监听共用 --ip 参数, 默认 localhost(只监听 127.0.0.1)
 
 websocket 协议是基于 https://github.com/coder/websocket 这个库解析的，
 

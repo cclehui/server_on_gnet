@@ -132,7 +132,8 @@ copy InboundBuffered()  ───► inboundBuffer (blocking io.Reader)
 - `exceptions.go`: exported sentinel errors (`ErrNotUpgraded`).
 - `data_handler.go`: `DataHandlerParam` (message bytes, `MessageType`, upgraded
   conn, server) and `EchoDataHandler` default echo.
-- `client.go`: `ClientTemplate` — a browser HTML/JS test client.
+- `html_template.go`: `ClientTemplate` — a browser HTML/JS test client; the
+  message pane prepends new frames so the newest response stays on top.
 
 ### grpc (reference / TODO)
 

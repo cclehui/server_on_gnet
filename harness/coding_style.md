@@ -35,7 +35,7 @@ responsibility:
 | `handler_context.go` | the per-message context struct handed to the handler |
 | `option.go` | functional options (`With*`) applied by the constructor, one file per protocol that has them |
 | `timewheel.go` | the idle-eviction timer, only where a protocol needs one |
-| `client.go` | the browser test page template (`html/template`), WebSocket only |
+| `html_template.go` | the browser test page template (`html/template`), WebSocket only |
 
 `tcp_fixed_head/protocal.go` is misspelled ("protocol"). Keep the name for now —
 renaming it is churn in a repo with no tests and moves every `git blame` line.
@@ -48,7 +48,7 @@ the demo across files; a reader should get the whole scenario from one screen.
 
 ### Two `main` packages, on purpose
 
-`websocket/client.go` lives inside package `websocket` and exports
+`websocket/html_template.go` lives inside package `websocket` and exports
 `ClientTemplate` instead of being a `main` — the demo's HTTP page needs it, and
 a `main` package cannot be imported. Conversely `grpc/` and the repo root are
 `main` packages because they are demos. `grpc/grpc_temp_client.go` is just

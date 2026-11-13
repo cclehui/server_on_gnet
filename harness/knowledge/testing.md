@@ -93,9 +93,10 @@ go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 - the browser page (`http://localhost:8080/`) auto-connects on load and logs
   `OPEN` / `SEND` / `RECV` / `CLOSE` with timestamps into the output pane, so a
   manual test shows something without opening the devtools console.
-- both example flags are configurable: `--ws-port` / `--http-port` on the
-  server, `-addr` / `-conns` / `-msgs` on the client, so a smoke test does not
-  need the default ports.
+- both example flags are configurable: `--ip` / `--ws-port` / `--http-port` on
+  the server, `-addr` / `-conns` / `-msgs` / `-split` / `-v` on the client, so a
+  smoke test does not need the default ports. `--ip` defaults to `localhost`
+  (binds 127.0.0.1 only); pass `--ip 0.0.0.0` to accept remote connections.
 
 A single successful echo is still a weak signal; use `-conns 20 -msgs 5` (and
 `go run -race` for the server) when touching the read or write path. Signal
