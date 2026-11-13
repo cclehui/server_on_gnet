@@ -43,10 +43,19 @@ func main() {
 
 	printBanner(port)
 
-	tcpServer := tcp_fixed_head.NewTCPFixHeadServer(port)
-	// 不设置 Handler 时用的是库里的 defaultHandler(同样是 PING->PONG),
+	// 不传 WithHandler 时用的是库里的 defaultHandler(同样是 PING->PONG),
 	// 这里显式替换是为了让日志能打上 action 和 peer 地址, 读起来更直观。
-	tcpServer.Handler = demoHandler
+	// 监听地址和 gnet 引擎选项也是 server 配置, 一起在构造期设好, Run 不再接参数。
+	tcpServer := tcp_fixed_head.NewTCPFixHeadServer(
+		tcp_fixed_head.WithProtoAddr(fmt.Sprintf("tcp://:%d", port)),
+		tcp_fixed_head.WithHandler(demoHandler),
+		tcp_fixed_head.WithContext(ctx),
+		tcp_fixed_head.WithGnetOptions(
+			gnet.WithReusePort(true),
+			gnet.WithMulticore(multicore),
+			gnet.WithTCPKeepAlive(time.Second*90),
+		),
+	)
 
 	clients := demoClients(port)
 
@@ -78,13 +87,7 @@ func main() {
 		commonutil.GetLogger().Infof(ctx, "[server] 连接已全部回收, 当前连接数=%d", tcpServer.GetConnNum())
 	}()
 
-	options := []gnet.Option{
-		gnet.WithReusePort(true),
-		gnet.WithMulticore(multicore),
-		gnet.WithTCPKeepAlive(time.Second * 90),
-	}
-
-	err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
+	err := tcpServer.Run()
 	if err != nil {
 		commonutil.GetLogger().Errorf(ctx, "启动失败:%+v", err)
 	}

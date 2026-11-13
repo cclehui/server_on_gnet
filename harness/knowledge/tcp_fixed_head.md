@@ -14,7 +14,9 @@ writing a new protocol package.
         +--------+--------+----------------------+-----------------+
 ```
 
-- All fields are **big-endian**; the header is exactly `DefaultHeadLength = 8`.
+- All fields are **big-endian**; the header is exactly
+  `DefaultHeadLength = 8`, stored per instance in `TCPFixHeadProtocol.HeadLength`
+  (set by `NewTCPFixHeadProtocol`, overridable with `WithHeadLength`).
 - `Version` must be `PROTOCOL_VERSION = 0x8001` (32769).
 - `ActionType` is one of `ACTION_PING = 0x0001`, `ACTION_PONG = 0x0002`,
   `ACTION_DATA = 0x00F0`. `ActionName` maps them to `PING` / `PONG` / `DATA`
@@ -160,7 +162,8 @@ connections arrive in arbitrary order.
   `ActionName`, and decide explicitly whether the default handler answers it.
   Forgetting `isCorrectAction` makes the new frame a protocol error; forgetting
   `ActionName` makes logs print `UNKNOWN`.
-- New header field: increase `DefaultHeadLength`, update `Decode`,
+- New header field: increase `DefaultHeadLength` (the per-instance
+  `HeadLength` defaults to it), update `Decode`,
   `DecodeFrame`, `ClientDecode`, and `EncodeData`/`EncodeWrite` together, and
   update the demo banner and `docs/architecture.md`. A header length change is
   a breaking wire change — say so in the answer.

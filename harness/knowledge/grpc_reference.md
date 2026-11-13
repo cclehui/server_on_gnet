@@ -72,7 +72,8 @@ scaffold for it. If you implement it:
 - the protobuf here is only a message definition; a wire protocol still needs a
   length-delimited framing (protobuf itself is not self-delimiting), which is
   exactly what `tcp_fixed_head` already demonstrates;
-- follow the `tcp_fixed_head` package shape (own package, `config.go` with the
-  frame constants, streaming decode in `OnTraffic`, ants offload);
+- follow the `tcp_fixed_head` package shape (own package, `constants.go` with
+  the frame constants, `exceptions.go` with sentinels, `option.go` for the
+  constructor knobs, streaming decode in `OnTraffic`, ants offload);
 - do not wire `CodecEmpty` into `gnet.Run` options speculatively — it is not
   used and gnet v2's option list does not include a codec hook in this version.

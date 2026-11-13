@@ -64,7 +64,7 @@ order.
 
 The process does not exit by itself: `gnet.Run` returns only when the engine
 stops. Stop it with `Ctrl-C` (SIGINT) — the `Run` wrapper logs
-`[server] 收到系统信号:interrupt` and calls `gnet.Stop`. Running it under
+`[server] 收到系统信号:interrupt` and calls `Engine.Stop`. Running it under
 `timeout 20 go run ...` is the easiest non-interactive check, but note `timeout`
 kills the `go run` wrapper, so the graceful-stop log may not appear.
 

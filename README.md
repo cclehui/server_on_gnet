@@ -34,14 +34,20 @@ go run .
 ./examples/tcp_fixed_head/tcp_fixed_head_server.go 中是具体的使用demo, 还包含了具体的测试client, 协议是完整的, 可以直接run起来试试
 ```
 port := 7001
-tcpServer := tcp_fixed_head.NewTCPFixHeadServer(port)
-options := []gnet.Option{
-	gnet.WithReusePort(true),
-	gnet.WithMulticore(multicore),
-	gnet.WithTCPKeepAlive(time.Second * 90),
-}
+// 监听地址和 gnet 引擎选项都是 server 配置, 一起在构造期通过 option 设置.
+// 监听地址不传时默认 DefaultProtoAddr(tcp://:7001, 所有网卡);
+// "tcp://127.0.0.1:<port>" 只监听本机, 也可以构造后直接改 server.ProtoAddr.
+tcpServer := tcp_fixed_head.NewTCPFixHeadServer(
+	tcp_fixed_head.WithProtoAddr(fmt.Sprintf("tcp://:%d", port)),
+	tcp_fixed_head.WithHandler(demoHandler),
+	tcp_fixed_head.WithGnetOptions(
+		gnet.WithReusePort(true),
+		gnet.WithMulticore(multicore),
+		gnet.WithTCPKeepAlive(time.Second*90),
+	),
+)
 
-err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
+err := tcpServer.Run()
 
 ```
 

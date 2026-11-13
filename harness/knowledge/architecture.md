@@ -110,18 +110,26 @@ event-loop 0 — `engine_unix.go`). None of the demos pass that option. Periodic
 work therefore does not belong in `OnTick` here; the idle eviction runs on the
 ws time wheel and the connection-count printing on a plain goroutine.
 
-Graceful shutdown is installed by the package-level `Run` function:
+Graceful shutdown is installed by `tcp_fixed_head.(*TCPFixHeadServer).Run`:
 
 ```go
 signal.Notify(ch, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
-→ gnet.Stop(ctx, protoAddr)
+for s := range ch { engine.Stop(ctx) }
 ```
 
 Notes:
 
-- `gnet.Stop` needs the **same `protoAddr` string** passed to `gnet.Run`
-  (`"tcp://:7001"`), not the bare port. A mismatch returns an error and the
-  process keeps running.
+- It uses **`Engine.Stop`**, not the package-level `gnet.Stop`: the latter is
+  deprecated in gnet v2 (it looks the engine up in a global map by
+  `protoAddr`, so restarting on the same address with `WithReuseAddr`/
+  `WithReusePort` can stop the wrong engine and leak it).
+- The `Engine` value only exists inside `OnBoot`, so `OnBoot` hands it to the
+  signal goroutine over a buffered channel; `OnShutdown` closes that channel
+  (guarded by `sync.Once`) so a signal goroutine that never got an engine
+  exits instead of blocking forever.
+- The listen address lives in the exported `TCPFixHeadServer.ProtoAddr` field
+  (`tcp://host:port`); the constructor fills `DefaultProtoAddr` (`tcp://:7001`)
+  when `WithProtoAddr` was not used.
 - The goroutine is started *before* `gnet.Run`, so a signal arriving during
   startup is not lost.
 - The signal goroutine logs and exits; it never calls `os.Exit`, so deferred

@@ -26,14 +26,14 @@ responsibility:
 
 | File | Holds |
 |---|---|
-| `config.go` | sentinel `Err*` values + tiny pure helpers (`ActionName`, `isCorrectAction`) where the protocol keeps them here; `websocket` instead uses `exceptions.go` |
-| `constants.go` | the `const` block (pool size, frame limits, timeouts, header keys), where a protocol keeps its constants in their own file |
-| `exceptions.go` | the exported sentinel `Err*` values, `websocket` only (`ErrNotUpgraded`) |
-| `protocal.go` / `server.go` | frame decode/encode and the `gnet.EventHandler` implementation |
-| `upgrader.go` | ws handshake adapter (`GnetUpgraderConn`) + `ws.Upgrader` hooks |
+| `config.go` | tiny pure helpers (`ActionName`, `isCorrectAction`) |
+| `constants.go` | the `const` block (pool size, frame limits, timeouts, header keys) |
+| `exceptions.go` | the sentinel `Err*` values (`websocket.ErrNotUpgraded`, `tcp_fixed_head.Err*`) |
+| `option.go` | the `ServerOption` func type + `With*` constructors; the constructor applies these before defaults |
+| `protocal.go` / `server.go` | frame decode/encode; `server.go` holds the server struct **first**, then its `gnet.EventHandler` methods |
+| `server_factory.go` | `New<Type>Server` constructor: apply options, then fill defaults (pool, ctx, protocol) |
 | `handler.go` / `data_handler.go` | the exported handler func **type** + default implementation |
 | `handler_context.go` | the per-message context struct handed to the handler |
-| `option.go` | functional options (`With*`) applied by the constructor, one file per protocol that has them |
 | `timewheel.go` | the idle-eviction timer, only where a protocol needs one |
 | `html_template.go` | the browser test page template (`html/template`), WebSocket only |
 
@@ -61,11 +61,12 @@ a `main` package cannot be imported. Conversely `grpc/` and the repo root are
 Every protocol package exposes exactly this surface:
 
 ```go
-// Constructor: allocates the worker pool and installs the default handler.
-func NewTCPFixHeadServer(port int) *TCPFixHeadServer
+// Constructor: applies opts, then fills in defaults (pool, handler, ctx).
+func NewTCPFixHeadServer(opts ...ServerOption) *TCPFixHeadServer
 
 // Runner: starts gnet and installs the signal-driven graceful shutdown.
-func Run(server *TCPFixHeadServer, protoAddr string, opts ...gnet.Option) error
+// Listen address and gnet options are server config, set by options.
+func (tcphs *TCPFixHeadServer) Run() error
 
 // Business entry point: a func type, not an interface.
 type ServerHandler func(ctx *HandlerContext)
@@ -74,10 +75,12 @@ type ServerHandler func(ctx *HandlerContext)
 var defaultHandler ServerHandler = func(ctx *HandlerContext) { ... }
 ```
 
-- **Constructor does wiring only.** Build the ants pool, set defaults (handler,
-  `context.Background()`), apply `opts ...ServerOption` in order, return the
-  pointer. No listening, no goroutines.
-- **Options are `func(*Server)` values in `option.go`**, not a config struct.
+- **Constructor does wiring only.** Apply `opts ...ServerOption` in order, then
+  fill defaults (handler, `context.Background()`, ants pool, protocol), return
+  the pointer. No listening, no goroutines. It lives in `server_factory.go`.
+- **Options are `func(*Server)` values in `option.go`**, not a config struct. Both
+  `websocket` and `tcp_fixed_head` expose them (`WithHandler`, `WithWorkerPool`,
+  `WithContext`, plus package-specific knobs).
   Each `WithX` validates its argument and panics on nil/invalid input, so a bad
   wiring choice fails at construction instead of on the first connection; nil
   never means "use the default". Order in the constructor is options first,
@@ -85,13 +88,18 @@ var defaultHandler ServerHandler = func(ctx *HandlerContext) { ... }
   unset, and anything derived from a knob (the time wheel's slot count) is
   built after that. This keeps allocating defaults (the ants pool) from being
   created just to be overwritten.
-- **`Run` is a package function, not a method.** It takes the server so the
-  caller can mutate `Handler` before starting, and it returns the `gnet.Run`
-  error so `main` decides whether that is fatal.
+- **`Run` is a method on the server and takes no address** (`tcp_fixed_head`;
+  the `websocket` demo still calls `gnet.Run` directly). The constructor is the
+  only place to set knobs, including `WithProtoAddr` / `WithGnetOptions`; `Run`
+  returns the `gnet.Run` error so `main` decides whether that is fatal. The
+  listen address is the exported `ProtoAddr` field, not an int port — a bare
+  port cannot express host/scheme — and it defaults to the package's
+  `DefaultProtoAddr`.
 - **The server struct is mutable at construction time and read-only after
   `Run`.** Exported knobs (`Port`, `Addr`, `WorkerPool`, `Handler`,
-  `ConnCloseHandler`) are set by the caller before `Run`; internal state
-  (`ctx`, `connTimeWheel`) is unexported and never touched from outside.
+  `ConnCloseHandler`) are set through `With*` options before `Run`; internal
+  state (`ctx`, `protocol`, `connTimeWheel`) is unexported and never touched
+  from outside.
 - **A handler is a `func` type with one struct parameter.** Adding a field to
   the request means adding it to the param struct (`HandlerContext`,
   `DataHandlerParam`), not widening the function signature — existing users
@@ -182,11 +190,13 @@ return errors.Errorf("read data error, %v", err)
   `SEND_TIMEOUT`, `HANDSHAKE_BUFFER_SIZE`, `GO_VERSION_HEADER_KEY`). Follow the
   file you are editing; do not rename one protocol's constants to match the
   other as a drive-by change.
-- Values only the package uses stay unexported (`socketRingBufferSize`,
-  `bytesBufferPool`; in `websocket` the package-private `HANDSHAKE_BUFFER_SIZE`
-  and `GO_VERSION_HEADER_KEY` are still `UPPER_SNAKE` because that package
-  names all of its constants that way — do not export them just for the
-  capitalization).
+- Values only the package uses stay unexported (in `websocket` the
+  package-private `HANDSHAKE_BUFFER_SIZE` and `GO_VERSION_HEADER_KEY` are still
+  `UPPER_SNAKE` because that package names all of its constants that way — do
+  not export them just for the capitalization). Delete a constant when nothing
+  reads it instead of keeping it "for later".
+  Do not add a `sync.Pool` for something that is not on a hot path with a
+  measured allocation problem.
 - Time values are typed: `int64` seconds where the name says seconds
   (`CONN_MAX_IDLE_SECONDS` in `websocket`, `ConnMaxIdleSeconds` in
   `tcp_fixed_head`), `time.Duration` once it is used as a duration

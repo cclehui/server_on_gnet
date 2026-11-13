@@ -27,20 +27,55 @@ func (p *ProtocolData) HeadLength() int {
 	return DefaultHeadLength
 }
 
-type TCPFixHeadProtocol struct{}
-
-// new protocal
-func NewTCPFixHeadProtocol() *TCPFixHeadProtocol {
-	return &TCPFixHeadProtocol{}
+type TCPFixHeadProtocol struct {
+	// HeadLength 是协议头长度(字节). 默认 DefaultHeadLength, 由 NewTCPFixHeadProtocol 填;
+	// 以后头里加字段时改这里, 不用再翻每个取长度的地方.
+	HeadLength int
 }
 
-func (tcpfhp *TCPFixHeadProtocol) getHeadLength() int {
-	return DefaultHeadLength
+// 协议 option
+type ProtocolOption func(protocol *TCPFixHeadProtocol)
+
+// WithHeadLength 覆盖协议头长度. 只适用于头和默认布局兼容的变体,
+// Decode/DecodeFrame 仍然按 Version/ActionType/DataLength 的顺序读固定字段.
+func WithHeadLength(headLength int) ProtocolOption {
+	if headLength < DefaultHeadLength {
+		panic("tcp_fixed_head: WithHeadLength must be >= DefaultHeadLength")
+	}
+
+	return func(protocol *TCPFixHeadProtocol) {
+		protocol.HeadLength = headLength
+	}
+}
+
+// new protocal
+func NewTCPFixHeadProtocol(opts ...ProtocolOption) *TCPFixHeadProtocol {
+	protocol := &TCPFixHeadProtocol{HeadLength: DefaultHeadLength}
+
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+
+		opt(protocol)
+	}
+
+	return protocol
+}
+
+// headLength 返回生效的头长度: 手写 &TCPFixHeadProtocol{} 时兜底成默认值,
+// 避免零值把 header 全读没.
+func (tcpfhp *TCPFixHeadProtocol) headLength() int {
+	if tcpfhp.HeadLength <= 0 {
+		return DefaultHeadLength
+	}
+
+	return tcpfhp.HeadLength
 }
 
 // server端 gnet input 数据 decode
 func (tcpfhp *TCPFixHeadProtocol) Decode(c gnet.Conn) (*ProtocolData, error) {
-	headLength := tcpfhp.getHeadLength()
+	headLength := tcpfhp.headLength()
 
 	var protocolData *ProtocolData
 
@@ -131,6 +166,12 @@ func (tcpfhp *TCPFixHeadProtocol) Decode(c gnet.Conn) (*ProtocolData, error) {
 
 // 数据反解
 func (tcpfhp *TCPFixHeadProtocol) DecodeFrame(frame []byte) (*ProtocolData, error) {
+	// 半帧直接返回裸的 ErrIncompletePacket: 它是控制流哨兵, 调用方用 == 比较,
+	// 包一层会破坏这个约定
+	if len(frame) < tcpfhp.headLength() {
+		return nil, ErrIncompletePacket
+	}
+
 	data := &ProtocolData{}
 	//数据长度
 	bytesBuffer := bytes.NewBuffer(frame)
@@ -147,7 +188,7 @@ func (tcpfhp *TCPFixHeadProtocol) DecodeFrame(frame []byte) (*ProtocolData, erro
 		return nil, err
 	}
 
-	data.Data = frame[tcpfhp.getHeadLength():]
+	data.Data = frame[tcpfhp.headLength():]
 
 	return data, nil
 }
@@ -156,14 +197,15 @@ func (tcpfhp *TCPFixHeadProtocol) DecodeFrame(frame []byte) (*ProtocolData, erro
 func (tcpfhp *TCPFixHeadProtocol) ClientDecode(rawConn net.Conn) (*ProtocolData, error) {
 	newPackage := ProtocolData{}
 
-	headData := make([]byte, tcpfhp.getHeadLength())
+	headLength := tcpfhp.headLength()
+	headData := make([]byte, headLength)
 
 	n, err := io.ReadFull(rawConn, headData)
 	if err != nil {
 		return nil, err
 	}
-	if n != tcpfhp.getHeadLength() {
-		return nil, errors.New(fmt.Sprintf("read head error, want %d, got %d", tcpfhp.getHeadLength(), n))
+	if n != headLength {
+		return nil, errors.New(fmt.Sprintf("read head error, want %d, got %d", headLength, n))
 	}
 
 	//数据长度

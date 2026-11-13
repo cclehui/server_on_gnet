@@ -59,11 +59,21 @@ Wire format, 8-byte big-endian header + variable body:
 | Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | Data [DataLength]byte |
 ```
 
-- `config.go`: constants — `DefaultHeadLength=8`, `MaxDataLength=16MiB`,
+- `constants.go`: `DefaultProtoAddr="tcp://:7001"`, `DefaultHeadLength=8` (the default for
+  `TCPFixHeadProtocol.HeadLength`), `MaxDataLength=16MiB`,
   `PROTOCOL_VERSION=0x8001`, actions `ACTION_PING=0x0001` /
-  `ACTION_PONG=0x0002` / `ACTION_DATA=0x00F0`; sentinel errors
-  `ErrIncompletePacket` (keep buffering), `ErrProtocolVersion`,
-  `ErrUnknownAction`, `ErrDataLengthExceeded`, `ErrContext`.
+  `ACTION_PONG=0x0002` / `ACTION_DATA=0x00F0`, plus pool size.
+- `exceptions.go`: sentinel errors — `ErrIncompletePacket` (keep buffering),
+  `ErrProtocolVersion`, `ErrUnknownAction`, `ErrDataLengthExceeded`,
+  `ErrContext`. `config.go` keeps only `ActionName` / `isCorrectAction`.
+- `server_factory.go`: `NewTCPFixHeadServer(opts...)` — options first, then
+  defaults (handler, ctx, ants pool, bound protocol). The listen address
+  defaults to `DefaultProtoAddr` (`tcp://:7001`) and can be overridden with
+  `WithProtoAddr`.
+  `Run` is a method on the server and takes no arguments: `tcpServer.Run()`.
+  The exported `ProtoAddr` field holds the gnet listen address (default
+  `DefaultProtoAddr`, overridable with `WithProtoAddr` or by assignment), and
+  `WithGnetOptions(...)` holds the engine options.
 - `protocal.go`: `TCPFixHeadProtocol` —
   - `Decode(gnet.Conn)`: server-side streaming decode; partial frames return
     `ErrIncompletePacket` → handler returns `gnet.None` to wait for more data;
@@ -76,7 +86,8 @@ Wire format, 8-byte big-endian header + variable body:
     blocking client-side decode using `io.ReadFull`.
 - `server.go`: `TCPFixHeadServer` (implements `gnet.EventHandle`) + `Run()`
   which also installs an OS-signal goroutine (SIGHUP/QUIT/TERM/INT →
-  `gnet.Stop`) for graceful shutdown.
+  `Engine.Stop`, captured in `OnBoot`; `gnet.Stop` is deprecated) for graceful
+  shutdown.
 - `handler_context.go`: `HandlerContext` carries `ProtocolData`, `gnet.Conn`,
   and the server, and implements `context.Context` so handlers can log with it.
 - Log convention: every log line from this package is prefixed with `[server]`,
