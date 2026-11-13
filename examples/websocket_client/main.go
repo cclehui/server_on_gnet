@@ -26,12 +26,27 @@ import (
 //   - 一条消息被拆成多个 TCP 段(手工分片写)也能正确重组
 //   - 多连接并发收发
 //   - 客户端 close 握手后正常退出
+//
+// 默认会打印每一收每一发, 所以只看终端就能知道每步是否成功:
+//
+//	go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 2 -msgs 2
+//	[client-0] CONNECT ws://127.0.0.1:8081
+//	[client-0] OPEN    handshake ok, 耗时 1.2ms
+//	[client-0] SPLIT   "client-0 split": 手工分 2 段写帧, echo 校验通过
+//	[client-0] SEND    msg-0 "client-0 msg-0"
+//	[client-0] RECV    msg-0 "response is :client-0 msg-0, 当前时间:..."
+//	[client-0] CLOSE   正常关闭 (status=1000)
 func main() {
 	addr := flag.String("addr", "ws://127.0.0.1:8081", "websocket server url")
 	conns := flag.Int("conns", 8, "concurrent connections")
 	msgs := flag.Int("msgs", 5, "text messages per connection")
 	splitFrames := flag.Bool("split", true, "send frames split across TCP segments first")
+	verbose := flag.Bool("v", true, "log every send/receive; -v=false only prints the summary")
 	flag.Parse()
+
+	if *verbose {
+		log.SetFlags(0) // 去掉时间前缀, 19 个 client 并发时一行更好读
+	}
 
 	var failed int64
 	var wg sync.WaitGroup
@@ -42,7 +57,7 @@ func main() {
 		go func(idx int) {
 			defer wg.Done()
 
-			if err := runConn(*addr, idx, *msgs, *splitFrames); err != nil {
+			if err := runConn(*addr, idx, *msgs, *splitFrames, *verbose); err != nil {
 				atomic.AddInt64(&failed, 1)
 				log.Printf("[client-%d] FAILED: %+v", idx, err)
 			}
@@ -59,24 +74,51 @@ func main() {
 	}
 }
 
-func runConn(addr string, idx, msgs int, splitFrames bool) error {
+func runConn(addr string, idx, msgs int, splitFrames, verbose bool) error {
+	tag := fmt.Sprintf("[client-%d]", idx)
+	logf := func(format string, args ...interface{}) {
+		if verbose {
+			log.Printf(tag+" "+format, args...)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	wsConn, _, err := coderws.Dial(ctx, addr, &coderws.DialOptions{
+	logf("CONNECT %s", addr)
+	start := time.Now()
+
+	wsConn, resp, err := coderws.Dial(ctx, addr, &coderws.DialOptions{
 		HTTPClient: &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext}},
 	})
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
 
-	defer wsConn.Close(coderws.StatusNormalClosure, "")
+	logf("OPEN    handshake ok, status=%d, 耗时 %s, subprotocol=%q",
+		resp.StatusCode, time.Since(start).Round(time.Millisecond), wsConn.Subprotocol())
+
+	defer func() {
+		// 1000 = 正常关闭; 服务端空闲回收是 1001, 这里能看到区别
+		if err := wsConn.Close(coderws.StatusNormalClosure, ""); err != nil {
+			logf("CLOSE   关闭时返回错误: %+v", err)
+			return
+		}
+
+		logf("CLOSE   正常关闭 (status=%d)", coderws.StatusNormalClosure)
+	}()
 
 	if splitFrames {
 		// 分片用例要绕过 coder/websocket 的编码器, 单独开一条裸 TCP 连接
-		if err := splitRoundTrip(addr, fmt.Sprintf("client-%d split", idx)); err != nil {
+		payload := fmt.Sprintf("client-%d split", idx)
+		splitStart := time.Now()
+
+		if err := splitRoundTrip(addr, payload); err != nil {
 			return fmt.Errorf("split round trip: %w", err)
 		}
+
+		logf("SPLIT   %q: 手工分 2 段写帧, echo 校验通过, 耗时 %s",
+			payload, time.Since(splitStart).Round(time.Millisecond))
 	}
 
 	for i := 0; i < msgs; i++ {
@@ -86,6 +128,8 @@ func runConn(addr string, idx, msgs int, splitFrames bool) error {
 			return fmt.Errorf("write msg %d: %w", i, err)
 		}
 
+		logf("SEND    msg-%d %q", i, want)
+
 		_, got, err := wsConn.Read(ctx)
 		if err != nil {
 			return fmt.Errorf("read msg %d: %w", i, err)
@@ -94,7 +138,12 @@ func runConn(addr string, idx, msgs int, splitFrames bool) error {
 		if err := checkEcho(want, string(got)); err != nil {
 			return fmt.Errorf("msg %d: %w", i, err)
 		}
+
+		logf("RECV    msg-%d %q", i, string(got))
 	}
+
+	logf("DONE    %d 条消息全部 echo 校验通过, 总耗时 %s",
+		msgs, time.Since(start).Round(time.Millisecond))
 
 	return nil
 }

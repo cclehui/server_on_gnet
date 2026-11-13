@@ -79,14 +79,20 @@ go run ./examples/websocket
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
 
-- success on the client: `ok=8 fail=0`; it sends one deliberately
-  TCP-segmented frame per connection first (`-split=false` to skip), which is
-  the case the old gobwas implementation failed with `short buffer`.
+- success on the client: `ok=8 fail=0`, plus one `CONNECT` / `OPEN` / `SEND` /
+  `RECV` / `DONE` / `CLOSE` line per connection by default (pass `-v=false`
+  for only the summary). It sends one deliberately TCP-segmented frame per
+  connection first (`-split=false` to skip), reported as a `SPLIT` line — that
+  is the case the old gobwas implementation failed with `short buffer`.
 - success in the server log: `[server] ws 协议升级成功, from:...`, then per message
   `[server] 收到消息, ..., type:1, payload:"..."` and
   `[server] echo 收到数据, ...`, and on client close
   `[server] 客户端关闭连接, ..., status:1000`.
-- the demo also prints `当前连接数量: N` every 2 seconds.
+- the demo also logs `[server] 当前连接数=N` every 2 seconds through
+  `commonutil.GetLogger()`, so it appears as a JSON line like the rest.
+- the browser page (`http://localhost:8080/`) auto-connects on load and logs
+  `OPEN` / `SEND` / `RECV` / `CLOSE` with timestamps into the output pane, so a
+  manual test shows something without opening the devtools console.
 - both example flags are configurable: `--ws-port` / `--http-port` on the
   server, `-addr` / `-conns` / `-msgs` on the client, so a smoke test does not
   need the default ports.
