@@ -132,6 +132,10 @@ copy InboundBuffered()  ───► inboundBuffer (blocking io.Reader)
   handshakes are handled inside the library, not in our code.
   `SendDownStreamMsg` / `WSConn.WriteMessage` push server-initiated messages;
   `ConnCloseHandler` hook for close callbacks.
+- `server_factory.go`: `NewServer(addr, opts...)` / `NewEchoServer(addr, opts...)`
+  — options first, then defaults (`AcceptOptions`, ctx, idle timeout, ants pool,
+  time wheel). `NewEchoServer` prepends `EchoDataHandler` so a caller
+  `WithHandler` still wins.
 - `timewheel.go`: single-level hashing time wheel (idea from
   `ouqiang/timewheel`) — 1s interval, one slot per second over the max idle
   window; used to evict connections idle longer than `CONN_MAX_IDLE_SECONDS`

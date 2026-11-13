@@ -109,11 +109,12 @@ All constants live in `websocket/constants.go` and are `UPPER_SNAKE`; the
 exported sentinel errors live in `websocket/exceptions.go` (`ErrNotUpgraded`).
 There is no `config.go` in this package.
 
-`NewServer(addr string, opts ...ServerOption)` wires everything the struct
-exposes, so callers do not have to mutate fields after construction. The order
-is **options first, defaults second**: each default is only filled in when the
-corresponding field is still unset. A knob passed to `NewServer` is therefore
-never built and thrown away.
+`NewServer(addr string, opts ...ServerOption)` (in `server_factory.go`, same
+layout as `tcp_fixed_head`) wires everything the struct exposes, so callers do
+not have to mutate fields after construction. The order is **options first,
+defaults second**: each default is only filled in when the corresponding field
+is still unset. A knob passed to `NewServer` is therefore never built and
+thrown away.
 
 | Option | Effect | Default (only when the option is absent) |
 |---|---|---|
