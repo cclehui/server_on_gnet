@@ -2,7 +2,11 @@ package websocket
 
 import (
 	"container/list"
+	"context"
+	"sync/atomic"
 	"time"
+
+	"github.com/cclehui/server_on_gnet/commonutil"
 )
 
 // 时间轮实现参考的 https://github.com/ouqiang/timewheel
@@ -10,7 +14,7 @@ import (
 // Job 延时任务回调函数
 type jobParam struct {
 	server *WebSocketServer
-	wsConn *GnetUpgraderConn
+	wsConn *WSConn
 }
 
 type Job func(param *jobParam)
@@ -182,4 +186,26 @@ func (tw *TimeWheel) removeTask(key interface{}) {
 
 		e = e.Next()
 	}
+}
+
+// 连接超时管理函数
+func timeWheelJob(param *jobParam) {
+	if param == nil || param.wsConn == nil || param.server == nil {
+		return
+	}
+
+	diffNow := time.Now().Unix() - atomic.LoadInt64(&param.wsConn.LastActiveTs)
+
+	if diffNow > param.server.connIdleSeconds {
+		//长时间未活跃
+		commonutil.GetLogger().Infof(context.Background(),
+			"[server] 关闭连接, 连接空闲%d秒, %v", param.server.connIdleSeconds, param.wsConn.RemoteAddr())
+		//关闭连接
+		param.server.closeConn(param.wsConn)
+
+	} else {
+		//进入新的时间循环
+		param.server.connTimeWheel.AddTimer(time.Second*time.Duration(param.server.connIdleSeconds-diffNow), nil, param)
+	}
+
 }

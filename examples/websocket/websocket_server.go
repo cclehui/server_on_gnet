@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/cclehui/server_on_gnet/commonutil"
@@ -12,19 +15,29 @@ import (
 	"github.com/panjf2000/gnet/v2"
 )
 
-func wsHome(w http.ResponseWriter, r *http.Request) {
-	//websocket.ClientTemplate.Execute(w, "ws://"+r.Host+"/echo")
-	websocket.ClientTemplate.Execute(w, "ws://192.168.126.139:8081")
+// wsHome 按页面的访问地址推导 ws 地址: 主机名取自请求 Host,
+// 端口用 ws 服务的端口(页面和 ws 是两个端口, 不能直接用 r.Host 的端口)
+func wsHome(wsPort int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+
+		websocket.ClientTemplate.Execute(w, fmt.Sprintf("ws://%s", net.JoinHostPort(host, strconv.Itoa(wsPort))))
+	}
 }
 
 func main() {
 	ctx := context.Background()
 
-	go func() {
+	wsPort := flag.Int("ws-port", 8081, "websocket server port")
+	httpPort := flag.Int("http-port", 8080, "browser client page port")
+	flag.Parse()
 
-		//处理 websocket 协议的tcp服务监听在 8081端口上
-		port := 8081
-		addr := fmt.Sprintf(":%d", port)
+	go func() {
+		//处理 websocket 协议的tcp服务监听在 ws-port 端口上
+		addr := fmt.Sprintf(":%d", *wsPort)
 
 		tcpServer := websocket.NewEchoServer(addr)
 
@@ -41,16 +54,14 @@ func main() {
 			gnet.WithReusePort(true),
 			gnet.WithMulticore(true),
 		}
-		log.Fatal(gnet.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...))
+		log.Fatal(gnet.Run(tcpServer, fmt.Sprintf("tcp://:%d", *wsPort), options...))
 
 	}()
 
-	//var addr = flag.String("addr", "localhost:8080", "http service address")
-	addr := "0.0.0.0:8080"
+	addr := fmt.Sprintf("0.0.0.0:%d", *httpPort)
 
-	commonutil.GetLogger().Infof(ctx, "http server for websocket client is listen at :%s\n", addr)
+	commonutil.GetLogger().Infof(ctx, "http server for websocket client is listen at :%s", addr)
 
-	http.HandleFunc("/", wsHome)
+	http.HandleFunc("/", wsHome(*wsPort))
 	log.Fatal(http.ListenAndServe(addr, nil))
-
 }

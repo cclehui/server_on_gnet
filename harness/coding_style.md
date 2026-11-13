@@ -26,11 +26,14 @@ responsibility:
 
 | File | Holds |
 |---|---|
-| `config.go` | `const` block (pool size, frame limits, protocol version, action codes, timeouts) + sentinel `Err*` values + tiny pure helpers (`ActionName`, `isCorrectAction`) |
+| `config.go` | sentinel `Err*` values + tiny pure helpers (`ActionName`, `isCorrectAction`) where the protocol keeps them here; `websocket` instead uses `exceptions.go` |
+| `constants.go` | the `const` block (pool size, frame limits, timeouts, header keys), where a protocol keeps its constants in their own file |
+| `exceptions.go` | the exported sentinel `Err*` values, `websocket` only (`ErrNotUpgraded`) |
 | `protocal.go` / `server.go` | frame decode/encode and the `gnet.EventHandler` implementation |
 | `upgrader.go` | ws handshake adapter (`GnetUpgraderConn`) + `ws.Upgrader` hooks |
 | `handler.go` / `data_handler.go` | the exported handler func **type** + default implementation |
 | `handler_context.go` | the per-message context struct handed to the handler |
+| `option.go` | functional options (`With*`) applied by the constructor, one file per protocol that has them |
 | `timewheel.go` | the idle-eviction timer, only where a protocol needs one |
 | `client.go` | the browser test page template (`html/template`), WebSocket only |
 
@@ -72,7 +75,16 @@ var defaultHandler ServerHandler = func(ctx *HandlerContext) { ... }
 ```
 
 - **Constructor does wiring only.** Build the ants pool, set defaults (handler,
-  `context.Background()`), return the pointer. No listening, no goroutines.
+  `context.Background()`), apply `opts ...ServerOption` in order, return the
+  pointer. No listening, no goroutines.
+- **Options are `func(*Server)` values in `option.go`**, not a config struct.
+  Each `WithX` validates its argument and panics on nil/invalid input, so a bad
+  wiring choice fails at construction instead of on the first connection; nil
+  never means "use the default". Order in the constructor is options first,
+  defaults second: every default is filled in only when the field is still
+  unset, and anything derived from a knob (the time wheel's slot count) is
+  built after that. This keeps allocating defaults (the ants pool) from being
+  created just to be overwritten.
 - **`Run` is a package function, not a method.** It takes the server so the
   caller can mutate `Handler` before starting, and it returns the `gnet.Run`
   error so `main` decides whether that is fatal.
@@ -93,12 +105,13 @@ var defaultHandler ServerHandler = func(ctx *HandlerContext) { ... }
 
 ```go
 options := ants.Options{ExpiryDuration: time.Second * 10, Nonblocking: true}
-pool, _ := ants.NewPool(DefaultAntsPoolSize, ants.WithOptions(options))
+pool, _ := ants.NewPool(DEFAULT_ANTS_POOL_SIZE, ants.WithOptions(options)) // websocket
 ```
 
-- `DefaultAntsPoolSize` is `1024 * 1024` and is declared **per protocol
-  package**, not shared. Keep it that way: each protocol owns its pool and its
-  own tuning.
+- The pool size is `1024 * 1024` and is declared **per protocol package**, not
+  shared: `tcp_fixed_head.DefaultAntsPoolSize`, or
+  `websocket.DEFAULT_ANTS_POOL_SIZE` in `websocket/constants.go`. Keep it that
+  way: each protocol owns its pool and its own tuning.
 - The constructor ignores the pool error. That is deliberate (the arguments are
   static and valid); do not add an `error` return just for this.
 - `Nonblocking: true` is what makes `Submit` safe on the reactor: when the pool
@@ -160,17 +173,27 @@ return errors.Errorf("read data error, %v", err)
 ## Constants
 
 - One `const` block per file, at the top, with short doc comments.
-- Exported values are `UPPER_SNAKE` **only** for wire-level identifiers the
-  caller must reference (`PROTOCOL_VERSION`, `ACTION_PING`, `ACTION_PONG`,
-  `ACTION_DATA`). Tunables and internal sizes are mixed-case
-  (`DefaultAntsPoolSize`, `MaxDataLength`, `ConnMaxIdleSeconds`) and exported
-  only when a caller needs them.
-- Unused internals stay unexported (`socketRingBufferSize`, `bytesBufferPool`).
+- Naming differs per protocol: `tcp_fixed_head` uses `UPPER_SNAKE` only for
+  wire-level identifiers (`PROTOCOL_VERSION`, `ACTION_PING`, `ACTION_PONG`,
+  `ACTION_DATA`) and mixed-case for tunables (`DefaultAntsPoolSize`,
+  `MaxDataLength`). `websocket` keeps every constant in `constants.go` and
+  names all of them `UPPER_SNAKE` (`DEFAULT_ANTS_POOL_SIZE`,
+  `CONN_MAX_IDLE_SECONDS`, `MAX_MESSAGE_BYTES`, `HANDSHAKE_TIMEOUT`,
+  `SEND_TIMEOUT`, `HANDSHAKE_BUFFER_SIZE`, `GO_VERSION_HEADER_KEY`). Follow the
+  file you are editing; do not rename one protocol's constants to match the
+  other as a drive-by change.
+- Values only the package uses stay unexported (`socketRingBufferSize`,
+  `bytesBufferPool`; in `websocket` the package-private `HANDSHAKE_BUFFER_SIZE`
+  and `GO_VERSION_HEADER_KEY` are still `UPPER_SNAKE` because that package
+  names all of its constants that way — do not export them just for the
+  capitalization).
 - Time values are typed: `int64` seconds where the name says seconds
-  (`ConnMaxIdleSeconds`), `time.Duration` once it is used as a duration.
-- Duplicating a value across two protocol packages (`DefaultAntsPoolSize`, an
-  idle timeout) is acceptable; hoisting it into `commonutil` is only worth it
-  when both packages must change together.
+  (`CONN_MAX_IDLE_SECONDS` in `websocket`, `ConnMaxIdleSeconds` in
+  `tcp_fixed_head`), `time.Duration` once it is used as a duration
+  (`HANDSHAKE_TIMEOUT`, `SEND_TIMEOUT`).
+- Duplicating a value across two protocol packages (pool size, an idle timeout)
+  is acceptable; hoisting it into `commonutil` is only worth it when both
+  packages must change together.
 
 ## Naming and Receivers
 

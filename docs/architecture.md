@@ -13,7 +13,7 @@ All gnet-based servers follow the same core pattern:
    (`c.SetContext` / `c.Context()`), enabling streaming (half-packet) decoding.
 2. **Worker pool (ants)** — decoded messages are submitted to an
    [`ants`](https://github.com/panjf2000/ants/v2) goroutine pool
-   (`DefaultAntsPoolSize = 1024*1024`, nonblocking, 10s expiry) so business
+   (`DEFAULT_ANTS_POOL_SIZE = 1024*1024`, nonblocking, 10s expiry) so business
    handlers never block the reactor.
 3. **Pluggable handler functions** — servers expose a handler function type
    (`ServerHandler` / `DataHandler`) with a default echo implementation, so
@@ -37,7 +37,7 @@ All gnet-based servers follow the same core pattern:
 |---|---|
 | `commonutil/` | Shared logger abstraction and small utilities |
 | `tcp_fixed_head/` | Fixed-header / variable-body TCP protocol server |
-| `websocket/` | WebSocket server (gnet + gobwas/ws) with idle-conn management |
+| `websocket/` | WebSocket server (gnet + coder/websocket) with idle-conn management |
 | `grpc/` | Standalone gRPC + protobuf demo (not gnet-based, reference code) |
 | `examples/` | Runnable demos with test clients for both server types |
 | root (`proto_temp.go`) | Protobuf marshal/unmarshal scratch demo |
@@ -88,29 +88,50 @@ Wire format, 8-byte big-endian header + variable body:
 
 ### websocket — WebSocket server over gnet
 
-Built on [gobwas/ws](https://github.com/gobwas/ws). Key trick: adapt
-`gnet.Conn` to `io.Reader`/`io.Writer` so standard ws parsing works inside a
-gnet event loop (gnet v2 conn already satisfies Read/Write).
+Built on [coder/websocket](https://github.com/coder/websocket). That library is
+**blocking and goroutine-oriented** (its handshake needs `http.Hijacker`, its
+framing needs blocking reads), while gnet's `Conn.Read` is non-blocking. So the
+integration deliberately splits work by goroutine instead of decoding inside
+the reactor:
 
-- `upgrader.go`: `GnetUpgraderConn` wraps `gnet.Conn` + `ws.Upgrader`,
-  records `LastActiveTs` and `IsSuccessUpgraded`; `defaultUpgrader` hooks
-  (`OnHost/OnHeader/OnRequest/OnBeforeUpgrade`) validate/observe the HTTP
-  handshake.
-- `server.go`: `WebSocketServer.OnTraffic` state machine:
-  1. first bytes → store `GnetUpgraderConn` in conn context and run the ws
-     handshake upgrade;
-  2. after upgrade → `wsutil.ReadClientMessage`: `OpPing` → `OpPong` reply;
-     `OpText` → dispatch to `DataHandler` on the ants pool; `OpClose` → send
-     close frame and `gnet.Close`.
-  `SendDownStreamMsg` pushes server-initiated frames; `ConnCloseHandler`
-  hook for close callbacks.
+```
+reactor (OnTraffic)          read goroutine (1 per conn)        business goroutines
+───────────────────          ──────────────────────────        ────────────────────
+copy InboundBuffered()  ───► inboundBuffer (blocking io.Reader)
+                                    │
+                             http.ReadRequest ─► coder/websocket.Accept
+                                    │
+                             conn.Read loop ──► WorkerPool.Submit ──► DataHandler
+                                                                          │
+                             AsyncWrite on the event loop  ◄── coder/websocket Write
+```
+
+- `conn.go`: `WSConn` wraps `gnet.Conn` and implements `net.Conn`; the
+  `inboundBuffer` is the reactor → read-goroutine queue (blocking `Read`, so TCP
+  segmentation can no longer desynchronize the stream), and `Write` copies then
+  hands the buffer to `AsyncWrite`, which gnet executes on the event loop. That
+  is why handlers may write from any goroutine.
+- `conn.go`: `handshakeResponseWriter` satisfies `http.ResponseWriter` +
+  `http.Hijacker` so `coder/websocket.Accept` can write its 101 response and
+  take over the connection. `Hijack` returns the same `*bufio.Reader` used to
+  parse the request, so a frame pipelined behind the handshake is not lost.
+- `server.go`: `OnTraffic` only copies bytes; `OnOpen` starts
+  `serveConn` (handshake with `HANDSHAKE_TIMEOUT`, then a `conn.Read` loop that
+  dispatches text/binary to `DataHandler`). Ping/Pong/Close framing and close
+  handshakes are handled inside the library, not in our code.
+  `SendDownStreamMsg` / `WSConn.WriteMessage` push server-initiated messages;
+  `ConnCloseHandler` hook for close callbacks.
 - `timewheel.go`: single-level hashing time wheel (idea from
   `ouqiang/timewheel`) — 1s interval, one slot per second over the max idle
-  window; used to evict connections idle longer than `ConnMaxIdleSeconds`
-  (600s, see `config.go`). Active connections re-arm their timer on each
-  read/write.
-- `data_handler.go`: `DataHandlerParam` (request bytes, opcode, writer,
-  upgraded conn, server) and `EchoDataHandler` default echo.
+  window; used to evict connections idle longer than `CONN_MAX_IDLE_SECONDS`
+  (600s, see `constants.go`). Eviction goes through `Conn.Close` so the peer
+  gets a `StatusGoingAway` close frame.
+- `constants.go`: every `UPPER_SNAKE` constant (`DEFAULT_ANTS_POOL_SIZE`,
+  `CONN_MAX_IDLE_SECONDS`, `MAX_MESSAGE_BYTES`, `HANDSHAKE_TIMEOUT`,
+  `SEND_TIMEOUT`, `HANDSHAKE_BUFFER_SIZE`, `GO_VERSION_HEADER_KEY`).
+- `exceptions.go`: exported sentinel errors (`ErrNotUpgraded`).
+- `data_handler.go`: `DataHandlerParam` (message bytes, `MessageType`, upgraded
+  conn, server) and `EchoDataHandler` default echo.
 - `client.go`: `ClientTemplate` — a browser HTML/JS test client.
 
 ### grpc (reference / TODO)
@@ -129,10 +150,13 @@ kept as learning material for the "pb protocol over gnet" TODO.
 # bytes so you can watch the server reject the frame and close that connection.
 go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 
-# WebSocket server on :8081 plus an HTTP page on :8080 to drive a browser client.
-# The page template hard-codes ws://192.168.126.139:8081 -- edit wsHome in the
-# example (or use any ws client) if your host differs. :8080 must be free.
+# WebSocket server on :8081 plus an HTTP page on :8080 to drive a browser client
+# (the page derives the ws:// URL from the request Host, so no editing needed).
 go run ./examples/websocket
+
+# Scripted WS client: echo round-trips + a frame split across TCP segments +
+# concurrent connections. Exits non-zero on failure.
+go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
 
 Common gnet options used by examples: `WithReusePort(true)`,
@@ -140,25 +164,27 @@ Common gnet options used by examples: `WithReusePort(true)`,
 
 ## Known Limitations
 
-Recorded so they are not mistaken for intended behavior. Details and the fix
-direction live in `harness/knowledge/websocket.md`. All of them are on the
-WebSocket side; the TCP fixed-head decoder does not share them.
+Recorded so they are not mistaken for intended behavior. Details live in
+`harness/knowledge/websocket.md`.
 
-- **WebSocket reads are not resumable.** `gnet.Conn.Read` is non-blocking, so a
-  frame split across two TCP segments makes `wsutil.ReadClientMessage` fail
-  mid-frame; the bytes already consumed are lost and that connection's stream
-  is desynchronized. Reproduced locally by writing a masked text frame in two
-  halves — the server logs `short buffer` and never answers; plain loopback
-  echo also fails intermittently (measured 1 and 3 failures out of 12).
-- **WebSocket downlink writes happen off the event loop.** `EchoDataHandler`
-  and `SendDownStreamMsg` call `wsutil.WriteServerMessage` → `Conn.Write` from
-  an ants worker, although gnet documents `Write` as event-loop-only.
-  `go run -race` against concurrent echo clients reports the resulting
-  data race (`GnetUpgraderConn.Write` vs `updateConnActiveTs`). The safe
-  path is to encode with `ws.WriteFrame` into a buffer, then hand that buffer
-  to `Conn.AsyncWrite`.
-- **No read size limit, origin check, auth, or subprotocol negotiation** on the
-  ws server; the TCP server caps a frame at 16 MiB.
+- **One goroutine per WebSocket connection.** `coder/websocket` is blocking by
+  design; the per-conn reader blocks in `inboundBuffer.Read`. This is the price
+  of correct framing (and of close/ping handling inside the library). The GOMAXPROCS-bounded
+  reactor still does no protocol work.
+- **`c.SetContext` / `SetSafeContext` is not used for the wrapper.** The
+  wrapper lives in `Context()`, which is only valid inside `EventHandler`
+  callbacks; other goroutines only touch the wrapper's own mutex-protected
+  fields, never `gnet.Conn`'s reader/writer methods.
+- **Origin verification is off by default.** `NewServer` sets
+  `AcceptOptions.InsecureSkipVerify = true` to preserve the previous
+  "accept any Host" behavior; pass `websocket.WithAcceptOptions` with
+  `OriginPatterns` (or flip the flag off) before exposing the server to
+  browsers on untrusted origins. There is still no auth or subprotocol
+  negotiation by default.
+- **WebSocket server options.** `NewServer(addr, opts...)` /
+  `NewEchoServer(addr, opts...)` accept `WithHandler`, `WithWorkerPool`,
+  `WithAcceptOptions`, `WithConnCloseHandler`, `WithContext`, and
+  `WithConnIdleTimeout`; see `harness/knowledge/websocket.md`.
 - `.golangci.yml` is a copied config: the linter is not installed and several
   enabled linters no longer exist upstream. Formatting is `gofmt`/`goimports`.
 

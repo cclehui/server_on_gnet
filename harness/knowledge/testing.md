@@ -71,32 +71,31 @@ kills the `go run` wrapper, so the graceful-stop log may not appear.
 ### websocket
 
 ```bash
+# terminal 1: ws listener on :8081 + browser page on :8080
 go run ./examples/websocket
+
+# terminal 2: scripted client (echo + a frame split across TCP segments +
+# concurrent connections); exits non-zero if any connection fails
+go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
 
-- ws listener on `:8081`, HTTP page on `:8080`;
-- the page is hard-coded to `ws://192.168.126.139:8081`; on another host, edit
-  `examples/websocket/websocket_server.go`'s `wsHome` or use any ws client
-  pointed at `ws://localhost:8081`;
-- success shows `[server] ws 协议升级成功, from:...`, then for each text
-  message `[server] 收到 TEXT, ... payload:"..."` and
-  `[server] echo 收到数据, opcode:1, data:"..."`;
-- the demo prints `当前连接数量: N` every 2 seconds from a separate goroutine.
+- success on the client: `ok=8 fail=0`; it sends one deliberately
+  TCP-segmented frame per connection first (`-split=false` to skip), which is
+  the case the old gobwas implementation failed with `short buffer`.
+- success in the server log: `[server] ws 协议升级成功, from:...`, then per message
+  `[server] 收到消息, ..., type:1, payload:"..."` and
+  `[server] echo 收到数据, ...`, and on client close
+  `[server] 客户端关闭连接, ..., status:1000`.
+- the demo also prints `当前连接数量: N` every 2 seconds.
+- both example flags are configurable: `--ws-port` / `--http-port` on the
+  server, `-addr` / `-conns` / `-msgs` on the client, so a smoke test does not
+  need the default ports.
 
-There is no scripted ws client, so a non-interactive check is limited to
-"server starts, upgrade succeeds, one message round-trips". If you use
-`websocat`/`wscat`, remember the server has no origin/auth checks, so any
-client is accepted.
-
-**A single successful echo does not prove the ws server is healthy.** A scratch
-`gobwas/ws` client on loopback, one text frame per connection, failed roughly
-1-in-12 to 3-in-12 even when nothing was wrong with the client (server logged
-`short buffer`, then `use of reserved op code`, client timed out) — see the
-known limitations in `harness/knowledge/websocket.md`. When checking a ws
-change, run more than one message and treat an occasional `short buffer` log as
-the existing bug, not as a regression you introduced. `go run -race` also
-reports a race in the echo path, so a clean race report is not achievable until
-that is fixed.
+A single successful echo is still a weak signal; use `-conns 20 -msgs 5` (and
+`go run -race` for the server) when touching the read or write path. Signal
+handling for `examples/websocket` is split across two servers (the gnet engine
+and the `net/http` page server), so `timeout`/`Ctrl-C` kills the process rather
+than draining it — that is the example, not the library.
 
 ### grpc and root
 

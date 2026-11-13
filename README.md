@@ -19,17 +19,26 @@ err := tcp_fixed_head.Run(tcpServer, fmt.Sprintf("tcp://:%d", port), options...)
 ```
 
 ## websocket server
-./examples/websocket/websocket_server.go 中是具体的使用demo, 页面里的 ws 地址是按示例机器
-硬编码的(`ws://192.168.126.139:8081`), 换机器时改 `wsHome` 或直接用任意 ws 客户端连 `ws://localhost:8081`
+./examples/websocket/websocket_server.go 中是具体的使用demo, 页面里的 ws 地址按当前请求的 Host 生成,
+默认连 `ws://localhost:8081`; ./examples/websocket_client 是一个脚本化客户端, 用来验证 echo、TCP 分片和并发连接
 
-websocket 协议是基于 https://github.com/gobwas/ws 这个库解析的，
+websocket 协议是基于 https://github.com/coder/websocket 这个库解析的，
 
-gnet 如何 使用websocket库的? 核心代码是把 gnet.Conn封装一个 io.ReaderWriter接口出来， 具体代码在./websocket/upgrader.go中实现, gnet v2 connection 已兼容reader writer
+gnet 如何 使用websocket库的? 这个库是阻塞式 io(net.Conn 形态), 而 gnet 的 Conn.Read 是非阻塞的,
+所以协议解析不能放在 reactor 里: reactor(OnTraffic) 只把字节拷贝给每连接的读协程, 读协程里完成握手和解帧,
+下行写统一走 AsyncWrite(在事件循环执行). 适配代码在 ./websocket/conn.go 中
 
 ```
 port := 8081
 addr := fmt.Sprintf(":%d", port)
-tcpServer := websocket.NewEchoServer(addr)
+// NewServer/NewEchoServer 都接受 option: WithHandler / WithWorkerPool /
+// WithAcceptOptions / WithConnCloseHandler / WithContext / WithConnIdleTimeout
+tcpServer := websocket.NewEchoServer(addr,
+	websocket.WithConnIdleTimeout(600),
+	websocket.WithAcceptOptions(&coderws.AcceptOptions{
+		OriginPatterns: []string{"your.example.com"},
+	}),
+)
 options := []gnet.Option{
 	gnet.WithReusePort(true),
 		gnet.WithMulticore(true),
