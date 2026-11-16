@@ -15,7 +15,7 @@ var defaultHandler ServerHandler = func(ctx *HandlerContext) {
 		return
 	}
 
-	protocol := NewTCPFixHeadProtocol()
+	protocol := ctx.Protocol()
 
 	// 日志统一带 [server] 前缀, 和 client 侧日志区分开
 	commonutil.GetLogger().Infof(ctx, "[server] 收到 %s, from:%s, data:%q",

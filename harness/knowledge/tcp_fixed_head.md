@@ -1,22 +1,24 @@
 # tcp_fixed_head
 
-Fixed 8-byte header, variable body. This is the reference implementation of
+Fixed-length header (8 bytes by default, configurable), variable body. This is the reference implementation of
 "how to write a streaming protocol server on gnet here" — read it before
 writing a new protocol package.
 
 ## Wire format
 
 ```
- offset 0        2        4                      8
-        +--------+--------+----------------------+-----------------+
-        |Version | Action | DataLength (uint32)  | Data[DataLength]|
-        | uint16 | uint16 |      big-endian      |                 |
-        +--------+--------+----------------------+-----------------+
+ offset 0        2        4                      8         HeadLength
+        +--------+--------+----------------------+----------+-----------------+
+        |Version | Action | DataLength (uint32)  | reserved | Data[DataLength]|
+        | uint16 | uint16 |      big-endian      |  (0..n)  |                 |
+        +--------+--------+----------------------+----------+-----------------+
 ```
 
-- All fields are **big-endian**; the header is exactly
+- All fields are **big-endian**; the header is
   `DefaultHeadLength = 8`, stored per instance in `TCPFixHeadProtocol.HeadLength`
-  (set by `NewTCPFixHeadProtocol`, overridable with `WithHeadLength`).
+  (set by `NewTCPFixHeadProtocol`, overridable with `WithHeadLength`). A larger
+  header keeps the same first 8 bytes and adds reserved bytes: decode skips them,
+  encode zero-fills them. Both peers must use the same `HeadLength`.
 - `Version` must be `PROTOCOL_VERSION = 0x8001` (32769).
 - `ActionType` is one of `ACTION_PING = 0x0001`, `ACTION_PONG = 0x0002`,
   `ACTION_DATA = 0x00F0`. `ActionName` maps them to `PING` / `PONG` / `DATA`
@@ -46,9 +48,9 @@ a read deadline set (`conn.SetReadDeadline`), which is what the demo does.
 
 ```
 Context() == nil
-  └─ have >= 8 header bytes?
+  └─ have >= HeadLength header bytes?
        no  → return ErrIncompletePacket  (caller returns gnet.None)
-       yes → Next(8), parse Version/Action/DataLength
+       yes → Next(HeadLength), parse Version/Action/DataLength (skip reserved bytes)
               validate version, action, length  ← any failure: return error
               c.SetContext(&ProtocolData{header only})
 Context() != nil

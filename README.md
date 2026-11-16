@@ -17,11 +17,11 @@
 - **完整生命周期**：实现 `gnet.EventHandle`，覆盖 `OnBoot` / `OnOpen` / `OnTraffic` / `OnClose` / `OnTick` / `OnShutdown`，并提供信号触发的优雅退出。
 - **可验证**：示例自带服务端 + 客户端，跑起来就能观察完整的收发与错误路径。
 
-## 支持的协议
+## `支持的协议`
 
 | 协议 | 包 | 状态 | 说明 |
 |---|---|---|---|
-| 固定头 TCP | [`tcp_fixed_head`](./tcp_fixed_head) | 可用 | 8 字节定长头 + 变长 body，支持流式解码 |
+| 固定头 TCP | [`tcp_fixed_head`](./tcp_fixed_head) | 可用 | 定长头 + 变长 body，头长度可配置（默认 8 字节），支持流式解码 |
 | WebSocket | [`websocket`](./websocket) | 可用 | 基于 `coder/websocket`，含空闲连接回收 |
 | gRPC | [`grpc`](./grpc) | 参考实现 | 独立 demo，未接入 gnet |
 | Protobuf | 根目录 `proto_temp.go` | 参考实现 | 序列化 / 反序列化小示例 |
@@ -85,10 +85,11 @@ go run .        # protobuf 序列化小 demo
 
 ### 固定头 TCP 服务
 
-协议格式（大端）：
+协议格式（大端）。头长度默认 8 字节，可用 `WithHeadLength` 调大；前 8 字节布局不变，
+多出的字节作为保留字段（解码忽略、编码补零），收发两端需配置成同一长度：
 
 ```text
-| Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | Data [DataLength]byte |
+| Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | [reserved] | Data [DataLength]byte |
 ```
 
 ```go
@@ -112,6 +113,8 @@ if err := tcpServer.Run(); err != nil {
 ```
 
 可用 option：`WithProtoAddr`、`WithHandler`、`WithWorkerPool`、`WithProtocol`、`WithGnetOptions`、`WithContext`。
+协议头长度用 `tcp_fixed_head.WithProtocol(tcp_fixed_head.NewTCPFixHeadProtocol(tcp_fixed_head.WithHeadLength(16)))` 配置；
+业务侧回包用 `ctx.Protocol()` 编码，自动使用同一个头长度。
 不传 `WithHandler` 时使用内置的 PING → PONG 回声处理器。
 
 ### WebSocket 服务

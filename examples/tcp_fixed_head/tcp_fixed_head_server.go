@@ -160,7 +160,7 @@ func demoHandler(hctx *tcp_fixed_head.HandlerContext) {
 		return
 	}
 
-	protocol := tcp_fixed_head.NewTCPFixHeadProtocol()
+	protocol := hctx.Protocol()
 	peer := peerName(hctx.Conn)
 
 	commonutil.GetLogger().Infof(hctx, "[server] 收到 %s, from:%s, data:%q",

@@ -53,14 +53,16 @@ All gnet-based servers follow the same core pattern:
 
 ### tcp_fixed_head — fixed-head-length TCP protocol
 
-Wire format, 8-byte big-endian header + variable body:
+Wire format, big-endian fixed-length header (8 bytes by default, configurable via
+`WithHeadLength`) + variable body:
 
 ```
-| Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | Data [DataLength]byte |
+| Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | [reserved] | Data [DataLength]byte |
 ```
 
 - `constants.go`: `DefaultProtoAddr="tcp://:7001"`, `DefaultHeadLength=8` (the default for
-  `TCPFixHeadProtocol.HeadLength`), `MaxDataLength=16MiB`,
+  `TCPFixHeadProtocol.HeadLength`, overridable with `WithHeadLength`; bytes beyond the
+  first 8 are reserved), `MaxDataLength=16MiB`,
   `PROTOCOL_VERSION=0x8001`, actions `ACTION_PING=0x0001` /
   `ACTION_PONG=0x0002` / `ACTION_DATA=0x00F0`, plus pool size.
 - `exceptions.go`: sentinel errors — `ErrIncompletePacket` (keep buffering),

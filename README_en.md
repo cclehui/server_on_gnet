@@ -21,7 +21,7 @@ Each protocol lives in its own package and ships with a runnable example plus a 
 
 | Protocol | Package | Status | Notes |
 |---|---|---|---|
-| Fixed-header TCP | [`tcp_fixed_head`](./tcp_fixed_head) | Available | 8-byte fixed header + variable body, streaming decode |
+| Fixed-header TCP | [`tcp_fixed_head`](./tcp_fixed_head) | Available | Fixed-length header + variable body, header length configurable (8 bytes by default), streaming decode |
 | WebSocket | [`websocket`](./websocket) | Available | Built on `coder/websocket`, with idle-connection eviction |
 | gRPC | [`grpc`](./grpc) | Reference | Standalone demo, not integrated with gnet |
 | Protobuf | root `proto_temp.go` | Reference | Small marshal / unmarshal demo |
@@ -85,10 +85,12 @@ go run .        # protobuf marshal / unmarshal demo
 
 ### Fixed-Header TCP Server
 
-Wire format (big-endian):
+Wire format (big-endian). The header is 8 bytes by default and can be enlarged with
+`WithHeadLength`; the first 8 bytes keep the same layout, extra bytes are reserved
+(ignored on decode, zero-filled on encode), and both peers must use the same length:
 
 ```text
-| Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | Data [DataLength]byte |
+| Version uint16 (0x8001) | ActionType uint16 | DataLength uint32 | [reserved] | Data [DataLength]byte |
 ```
 
 ```go
@@ -112,6 +114,8 @@ if err := tcpServer.Run(); err != nil {
 ```
 
 Available options: `WithProtoAddr`, `WithHandler`, `WithWorkerPool`, `WithProtocol`, `WithGnetOptions`, `WithContext`.
+Set the header length with `tcp_fixed_head.WithProtocol(tcp_fixed_head.NewTCPFixHeadProtocol(tcp_fixed_head.WithHeadLength(16)))`;
+encode replies through `ctx.Protocol()` so both directions use the same header length.
 Without `WithHandler`, the built-in PING → PONG echo handler is used.
 
 ### WebSocket Server

@@ -18,12 +18,20 @@ type ProtocolData struct {
 	DataLength uint32
 	Data       []byte
 
+	// headLength 是本帧实际使用的头长度, 由解码器按协议配置填入.
+	// 默认布局之外多出来的字节目前作为保留字段(解码时忽略, 编码时补零).
+	headLength int
+
 	//headDecode bool
 	//Lock       sync.Mutex
 }
 
 // 协议头长度
 func (p *ProtocolData) HeadLength() int {
+	if p.headLength > 0 {
+		return p.headLength
+	}
+
 	return DefaultHeadLength
 }
 
@@ -36,8 +44,10 @@ type TCPFixHeadProtocol struct {
 // 协议 option
 type ProtocolOption func(protocol *TCPFixHeadProtocol)
 
-// WithHeadLength 覆盖协议头长度. 只适用于头和默认布局兼容的变体,
-// Decode/DecodeFrame 仍然按 Version/ActionType/DataLength 的顺序读固定字段.
+// WithHeadLength 覆盖协议头长度, 默认 DefaultHeadLength(8).
+// 头长度必须 >= 8, 前 8 字节仍是 Version/ActionType/DataLength 的固定布局;
+// 多出来的字节是保留字段: 解码时忽略, EncodeData/EncodeWrite 补零.
+// 收发两端必须配置成同一个长度.
 func WithHeadLength(headLength int) ProtocolOption {
 	if headLength < DefaultHeadLength {
 		panic("tcp_fixed_head: WithHeadLength must be >= DefaultHeadLength")
@@ -100,7 +110,7 @@ func (tcpfhp *TCPFixHeadProtocol) Decode(c gnet.Conn) (*ProtocolData, error) {
 			return nil, err
 		}
 
-		protocolData = &ProtocolData{}
+		protocolData = &ProtocolData{headLength: headLength}
 
 		//数据长度
 		bytesBuffer := bytes.NewBuffer(headData)
@@ -172,7 +182,7 @@ func (tcpfhp *TCPFixHeadProtocol) DecodeFrame(frame []byte) (*ProtocolData, erro
 		return nil, ErrIncompletePacket
 	}
 
-	data := &ProtocolData{}
+	data := &ProtocolData{headLength: tcpfhp.headLength()}
 	//数据长度
 	bytesBuffer := bytes.NewBuffer(frame)
 
@@ -195,9 +205,8 @@ func (tcpfhp *TCPFixHeadProtocol) DecodeFrame(frame []byte) (*ProtocolData, erro
 
 // client 端获取解包后的数据
 func (tcpfhp *TCPFixHeadProtocol) ClientDecode(rawConn net.Conn) (*ProtocolData, error) {
-	newPackage := ProtocolData{}
-
 	headLength := tcpfhp.headLength()
+	newPackage := ProtocolData{headLength: headLength}
 	headData := make([]byte, headLength)
 
 	n, err := io.ReadFull(rawConn, headData)
@@ -249,26 +258,14 @@ func (tcpfhp *TCPFixHeadProtocol) EncodeWrite(actionType uint16, data []byte, co
 		return errors.New("con 为空")
 	}
 
-	pdata := ProtocolData{}
-	pdata.Version = PROTOCOL_VERSION
-	pdata.ActionType = actionType
-	pdata.DataLength = uint32(len(data))
-	pdata.Data = data
+	header := tcpfhp.encodeHeader(actionType, uint32(len(data)))
 
-	if err := binary.Write(conn, binary.BigEndian, &pdata.Version); err != nil {
-		return errors.New(fmt.Sprintf("encodeWrite version error , %v", err))
+	if _, err := conn.Write(header); err != nil {
+		return errors.New(fmt.Sprintf("encodeWrite header error , %v", err))
 	}
 
-	if err := binary.Write(conn, binary.BigEndian, &pdata.ActionType); err != nil {
-		return errors.New(fmt.Sprintf("encodeWrite type error , %v", err))
-	}
-
-	if err := binary.Write(conn, binary.BigEndian, &pdata.DataLength); err != nil {
-		return errors.New(fmt.Sprintf("encodeWrite datalength error , %v", err))
-	}
-
-	if pdata.DataLength > 0 {
-		if err := binary.Write(conn, binary.BigEndian, &pdata.Data); err != nil {
+	if len(data) > 0 {
+		if _, err := conn.Write(data); err != nil {
 			return errors.New(fmt.Sprintf("encodeWrite data error , %v", err))
 		}
 	}
@@ -282,33 +279,22 @@ func (tcpfhp *TCPFixHeadProtocol) Encode(c gnet.Conn, buf []byte) ([]byte, error
 
 // 数据编码
 func (tcpfhp *TCPFixHeadProtocol) EncodeData(actionType uint16, data []byte) ([]byte, error) {
-	pdata := ProtocolData{}
-	pdata.Version = PROTOCOL_VERSION
-	pdata.ActionType = actionType
-	pdata.DataLength = uint32(len(data))
-	pdata.Data = data
+	header := tcpfhp.encodeHeader(actionType, uint32(len(data)))
+	frame := make([]byte, 0, len(header)+len(data))
+	frame = append(frame, header...)
+	frame = append(frame, data...)
 
-	result := make([]byte, 0)
+	return frame, nil
+}
 
-	buffer := bytes.NewBuffer(result)
+// encodeHeader 生成头长度与协议配置一致的 header: 前 8 字节写固定字段,
+// 超出默认布局的部分补零作为保留字段.
+func (tcpfhp *TCPFixHeadProtocol) encodeHeader(actionType uint16, dataLength uint32) []byte {
+	header := make([]byte, tcpfhp.headLength())
 
-	if err := binary.Write(buffer, binary.BigEndian, &pdata.Version); err != nil {
-		return nil, errors.New(fmt.Sprintf("encode version error , %v", err))
-	}
+	binary.BigEndian.PutUint16(header[0:2], PROTOCOL_VERSION)
+	binary.BigEndian.PutUint16(header[2:4], actionType)
+	binary.BigEndian.PutUint32(header[4:8], dataLength)
 
-	if err := binary.Write(buffer, binary.BigEndian, &pdata.ActionType); err != nil {
-		return nil, errors.New(fmt.Sprintf("encode type error , %v", err))
-	}
-
-	if err := binary.Write(buffer, binary.BigEndian, &pdata.DataLength); err != nil {
-		return nil, errors.New(fmt.Sprintf("encode datalength error , %v", err))
-	}
-
-	if pdata.DataLength > 0 {
-		if err := binary.Write(buffer, binary.BigEndian, &pdata.Data); err != nil {
-			return nil, errors.New(fmt.Sprintf("encode data error , %v", err))
-		}
-	}
-
-	return buffer.Bytes(), nil
+	return header
 }
