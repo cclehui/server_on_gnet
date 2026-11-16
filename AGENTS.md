@@ -12,8 +12,8 @@ read the one that matches the task instead of loading all of them.
 |---|---|
 | [harness/coding_style.md](./harness/coding_style.md) | Before writing or reviewing Go code: package layout, file naming, error/log/constant conventions, naming, comments. |
 | [harness/knowledge/architecture.md](./harness/knowledge/architecture.md) | Reactor + ants worker-pool model, `OnTraffic` decode loop, per-conn `Conn` context, lifecycle callbacks, graceful shutdown. |
-| [harness/knowledge/tcp_fixed_head.md](./harness/knowledge/tcp_fixed_head.md) | Touching the 8-byte-header protocol: wire format, streaming decode state, the three decode traps, handler contract. |
-| [harness/knowledge/websocket.md](./harness/knowledge/websocket.md) | Touching the WebSocket server: gobwas/ws usage, upgrader conn adapter, message loop, time-wheel idle eviction. |
+| [harness/knowledge/tcp_fixed_head.md](./harness/knowledge/tcp_fixed_head.md) | Touching the fixed-header protocol (8 bytes by default, configurable): wire format, streaming decode state, the three decode traps, handler contract. |
+| [harness/knowledge/websocket.md](./harness/knowledge/websocket.md) | Touching the WebSocket server: coder/websocket usage, gnet conn bridge + per-conn read goroutine, message loop, time-wheel idle eviction. |
 | [harness/knowledge/logging.md](./harness/knowledge/logging.md) | Logging through `commonutil.GetLogger()`, the JSON line format, the `[server]` / `[client-N]` tag convention, concurrency. |
 | [harness/knowledge/grpc_reference.md](./harness/knowledge/grpc_reference.md) | The `grpc/` and `proto_temp.go` reference code: why it is not gnet-based and where it is allowed to drift. |
 | [harness/knowledge/testing.md](./harness/knowledge/testing.md) | Before claiming a change works: what can be verified, how to run the examples, what has no coverage. |
@@ -26,10 +26,11 @@ read the one that matches the task instead of loading all of them.
 - No database, no external service: everything here is a process you start and
   a socket you connect to. `go build ./...` and `go test ./...` are enough to
   prove the tree compiles.
-- Dependencies are few and intentional: `gnet/v2`, `ants/v2`, `gobwas/ws`,
-  `pkg/errors`; `x/net` only supplies the legacy `context` used by
-  `tcp_fixed_head`/`websocket` and by the generated protobuf code; `grpc` +
-  `protobuf` exist for the reference demo. Adding one needs a reason.
+- Dependencies are few and intentional: `gnet/v2`, `ants/v2`,
+  `coder/websocket` (pinned to v1.8.12 — v1.8.14+ raises its `go` directive
+  above the module's 1.20), `pkg/errors`; `x/net` only supplies the legacy
+  `context` used by `tcp_fixed_head` and by the generated protobuf code;
+  `grpc` + `protobuf` exist for the reference demo. Adding one needs a reason.
 
 ```bash
 # fixed-head TCP demo: server on :7001 and 4 built-in clients (client-2 is
@@ -38,6 +39,10 @@ go run ./examples/tcp_fixed_head --port 7001 --multicore=true
 
 # WebSocket demo: ws server on :8081, browser client page on :8080
 go run ./examples/websocket
+
+# Scripted WS client: echo round-trips, a frame split across TCP segments,
+# concurrent connections; exits non-zero on failure
+go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 
 # grpc keepalive reference demo (self-contained client + server, :50051)
 go run ./grpc
