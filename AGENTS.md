@@ -1,9 +1,11 @@
 # server_on_gnet
 
-Go library of reusable server implementations built on the **gnet**
+Go library of reusable server implementations, primarily on the **gnet**
 (`github.com/panjf2000/gnet/v2`) event-driven networking framework. Module
 `github.com/cclehui/server_on_gnet`, Go 1.20 (toolchain here is 1.26). One
-package per protocol, plus runnable demos with real test clients.
+package per protocol, plus runnable demos with real test clients. `grpc/` is
+the exception: it wraps `google.golang.org/grpc` directly because gRPC owns its
+HTTP/2 transport.
 
 This file is the short contract. Everything else is split into focused docs —
 read the one that matches the task instead of loading all of them.
@@ -15,7 +17,7 @@ read the one that matches the task instead of loading all of them.
 | [harness/knowledge/tcp_fixed_head.md](./harness/knowledge/tcp_fixed_head.md) | Touching the fixed-header protocol (8 bytes by default, configurable): wire format, streaming decode state, the three decode traps, handler contract. |
 | [harness/knowledge/websocket.md](./harness/knowledge/websocket.md) | Touching the WebSocket server: coder/websocket usage, gnet conn bridge + per-conn read goroutine, message loop, time-wheel idle eviction. |
 | [harness/knowledge/logging.md](./harness/knowledge/logging.md) | Logging through `commonutil.GetLogger()`, the JSON line format, the `[server]` / `[client-N]` tag convention, concurrency. |
-| [harness/knowledge/grpc_reference.md](./harness/knowledge/grpc_reference.md) | The `grpc/` and `proto_temp.go` reference code: why it is not gnet-based and where it is allowed to drift. |
+| [harness/knowledge/grpc.md](./harness/knowledge/grpc.md) | The `grpc/` wrapper (why it is not gnet-based), service registration, connection counting, keepalive, and shutdown. |
 | [harness/knowledge/testing.md](./harness/knowledge/testing.md) | Before claiming a change works: what can be verified, how to run the examples, what has no coverage. |
 | [docs/architecture.md](./docs/architecture.md) | User-facing design overview (package map + running the demos). Keep it in sync with the knowledge files. |
 
@@ -30,7 +32,7 @@ read the one that matches the task instead of loading all of them.
   `coder/websocket` (pinned to v1.8.12 — v1.8.14+ raises its `go` directive
   above the module's 1.20), `pkg/errors`; `x/net` only supplies the legacy
   `context` used by `tcp_fixed_head` and by the generated protobuf code;
-  `grpc` + `protobuf` exist for the reference demo. Adding one needs a reason.
+  `grpc` + `protobuf` back the gRPC wrapper and example. Adding one needs a reason.
 
 ```bash
 # fixed-head TCP demo: server on :7001 and 4 built-in clients (client-2 is
@@ -44,8 +46,8 @@ go run ./examples/websocket
 # concurrent connections; exits non-zero on failure
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 
-# grpc keepalive reference demo (self-contained client + server, :50051)
-go run ./grpc
+# gRPC server + in-process keepalive client (:50051); exits on its own
+go run ./examples/grpc
 
 # protobuf scratch demo in the repo root
 go run .
