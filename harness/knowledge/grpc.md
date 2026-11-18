@@ -7,9 +7,8 @@ semantics, not simplify the server. The wrapper adds only what gRPC leaves to
 the caller: listening, connection counting, lifecycle logging, and signal-driven
 graceful shutdown.
 
-The protobuf scratch demo (`proto_temp.go`) and the generated protobufs still
-serve as the "pb over gnet" TODO's message definitions; they are unrelated to
-this wrapper.
+The protobuf scratch demo (`proto_temp.go`) and the generated protobufs are
+unrelated to this wrapper.
 
 ## What is here
 
@@ -117,10 +116,10 @@ connection age and 15-second idle timeout, the client's 10-second
 a keepalive example, not as a production configuration. Pass
 `--greet-delay 0s` for a fast smoke test.
 
-## The "pb over gnet" TODO
+## Protobuf over gnet (not planned)
 
-`README.md` lists a gnet-based protobuf protocol as a TODO, and
-`commonutil.CodecEmpty` is the scaffold for it. If you implement it:
+A gnet-based protobuf protocol is not on the roadmap. `commonutil.CodecEmpty`
+is an unused scaffold; if the need comes back:
 
 - the protobuf here is only a message definition; a wire protocol still needs a
   length-delimited framing (protobuf itself is not self-delimiting), which is

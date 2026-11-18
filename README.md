@@ -75,11 +75,27 @@ go run ./examples/websocket --ip 0.0.0.0 --ws-port 9081 --http-port 9080
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
 
+### gRPC 示例
+
+示例把服务端和内置客户端放在同一个进程里：起一个 `Greeter` 服务，按 `--conns` 并发建立连接，
+每个客户端调用 `SayHello` `--msgs` 次；结束后等连接回收再 `GracefulStop`，进程自行退出。
+
+```bash
+# 默认 :50051, 3 条连接、每条 2 次调用, SayHello 每次延迟 5s
+go run ./examples/grpc
+
+# 换地址/并发数, 并把 handler 延迟设为 0 做快速冒烟测试
+go run ./examples/grpc --addr 127.0.0.1:9000 --conns 2 --msgs 3 --greet-delay 0s
+```
+
+可用参数：`--addr`、`--conns`、`--msgs`、`--greet-delay`。服务端会打印
+`[server] 连接数=N, 新连接: ...`、`[server] SayHello ...`，客户端打印 `[client-N] RECV ...`，
+最后一条是 `[server] grpc server shutdown`。
+
 ### 其他示例
 
 ```bash
-go run ./examples/grpc   # gRPC 服务端 + 内置 client（keepalive / 连接计数 / 优雅停机），监听 :50051
-go run .                 # protobuf 序列化小 demo
+go run .   # protobuf 序列化小 demo
 ```
 
 ## 使用方式
@@ -157,6 +173,14 @@ stream 生命周期，用 gnet 重写只会丢掉这些语义。这个包补的�
 信号驱动停机，服务本身通过 `WithServiceRegistrar` 注册。
 
 ```go
+import (
+    grpcgo "google.golang.org/grpc"
+    "google.golang.org/grpc/keepalive"
+
+    "github.com/cclehui/server_on_gnet/grpc"
+    "github.com/cclehui/server_on_gnet/grpc/protobuf" // 本仓库的示例 proto
+)
+
 server := grpc.NewServer(
     grpc.WithAddr("127.0.0.1:50051"),
     grpc.WithServiceRegistrar(func(s *grpcgo.Server) {
@@ -195,6 +219,10 @@ client ──TCP──► gnet reactor ──decode──► ants worker pool �
 3. **`Next(n)` 的 `n` 必须大于 0**：`n <= 0` 在 gnet 中表示"读完整个缓冲区"，会吞掉下一条流水线帧。
 
 完整的包地图、生命周期与已知限制见 [docs/architecture.md](./docs/architecture.md)。
+
+gRPC 是上面这张图的例外：它直接包装 `google.golang.org/grpc`，由 gRPC 自己处理连接、
+HTTP/2 分帧和多路复用，包装层只负责监听、连接计数、日志和优雅停机。详见
+[harness/knowledge/grpc.md](./harness/knowledge/grpc.md)。
 
 ## 项目结构
 
@@ -237,9 +265,6 @@ go test ./...   # 当前各包均无测试文件（已知缺口）
 ## Roadmap
 
 - [ ] MQTT 协议
-- [ ] 连接管理
-- [ ] 基于 gnet 的 protobuf 协议
-- [ ] Thrift 协议
 - [ ] 长连接维持平台
 
 ## License

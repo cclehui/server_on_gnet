@@ -75,11 +75,28 @@ Covers echo round-trips, a frame split across TCP segments, and concurrent conne
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
 
+### gRPC Demo
+
+The example runs the server and an in-process client together: it starts the `Greeter`
+service, opens `--conns` concurrent connections, and calls `SayHello` `--msgs` times per
+client. It waits for the connections to drain, calls `GracefulStop`, and exits on its own.
+
+```bash
+# default :50051 with 3 connections, 2 calls each, 5s per SayHello
+go run ./examples/grpc
+
+# different address/concurrency, and no handler delay for a fast smoke test
+go run ./examples/grpc --addr 127.0.0.1:9000 --conns 2 --msgs 3 --greet-delay 0s
+```
+
+Flags: `--addr`, `--conns`, `--msgs`, `--greet-delay`. The server logs
+`[server] 连接数=N, 新连接: ...` and `[server] SayHello ...`; each client logs
+`[client-N] RECV ...`, and the run ends with `[server] grpc server shutdown`.
+
 ### Other Demos
 
 ```bash
-go run ./examples/grpc   # gRPC server + built-in client (keepalive, connection count, graceful stop), :50051
-go run .                 # protobuf marshal / unmarshal demo
+go run .   # protobuf marshal / unmarshal demo
 ```
 
 ## Usage
@@ -160,6 +177,14 @@ connection counting, logging, and signal-driven shutdown; services are supplied
 through `WithServiceRegistrar`.
 
 ```go
+import (
+    grpcgo "google.golang.org/grpc"
+    "google.golang.org/grpc/keepalive"
+
+    "github.com/cclehui/server_on_gnet/grpc"
+    "github.com/cclehui/server_on_gnet/grpc/protobuf" // example proto in this repo
+)
+
 server := grpc.NewServer(
     grpc.WithAddr("127.0.0.1:50051"),
     grpc.WithServiceRegistrar(func(s *grpcgo.Server) {
@@ -199,6 +224,11 @@ Three invariants that must not be broken:
 3. **`n` in `Next(n)` must be positive.** `n <= 0` means "read the whole buffer" in gnet and would swallow the next pipelined frame.
 
 See [docs/architecture.md](./docs/architecture.md) for the full package map, lifecycle, and known limitations.
+
+gRPC is the exception to the diagram above: it wraps `google.golang.org/grpc` directly,
+so gRPC owns connections, HTTP/2 framing, and multiplexing. The wrapper only adds
+listening, connection counting, logging, and graceful shutdown. See
+[harness/knowledge/grpc.md](./harness/knowledge/grpc.md).
 
 ## Project Layout
 
@@ -241,9 +271,6 @@ see [harness/knowledge/testing.md](./harness/knowledge/testing.md).
 ## Roadmap
 
 - [ ] MQTT protocol
-- [ ] Connection management
-- [ ] Protobuf over gnet
-- [ ] Thrift protocol
 - [ ] Long-connection maintenance platform
 
 ## License

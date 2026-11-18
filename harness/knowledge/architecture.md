@@ -162,8 +162,8 @@ negative.
 ## What is deliberately missing
 
 - No connection registry / broadcast: `websocket.SendDownStreamMsg` sends to
-  one connection you already hold. "Push to all clients" is the
-  `连接管理` / `长连接维持平台` TODO, not something to bolt on ad hoc.
+  one connection you already hold. "Push to all clients" belongs to the
+  `长连接维持平台` TODO, not something to bolt on ad hoc.
 - No reconnect or retry policy on the client side of the demos.
 - No metrics, tracing, or config layer. `Port` / `Addr` are constructor
   arguments.

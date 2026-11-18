@@ -241,8 +241,7 @@ Recorded so they are not mistaken for intended behavior. Details live in
   stash expected length, wait for the full body.
 - Logging goes through `commonutil.GetLogger()`, never `fmt`/`log` directly,
   in library packages.
-- TODOs from README: MQTT, centralized connection management, pb-over-gnet,
-  thrift, long-connection maintenance platform.
+- TODOs from README: MQTT and the long-connection maintenance platform.
 
 ## Quality Tooling
 
