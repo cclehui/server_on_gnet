@@ -104,15 +104,30 @@ handling for `examples/websocket` is split across two servers (the gnet engine
 and the `net/http` page server), so `timeout`/`Ctrl-C` kills the process rather
 than draining it — that is the example, not the library.
 
-### grpc and root
+### grpc
+
+`examples/grpc` starts the server and an in-process keepalive client, then stops
+the server itself. It exits on its own, so no `timeout` is needed:
 
 ```bash
-go run ./grpc     # :50051, self-contained client+server, prints goroutine ids
-go run .          # protobuf marshal/unmarshal scratch demo, prints two lines
+go run ./examples/grpc --addr 127.0.0.1:51051 --conns 3 --msgs 2 --greet-delay 0s
 ```
 
-Both are reference material; a change there only needs `go build` plus a single
-run showing the same output shape.
+Pass criteria:
+
+- one `[server] grpc server started, listen:...` line;
+- `[server] 连接数=1/2/3, 新连接: ...` for the three clients (order can vary);
+- six `[server] SayHello goroutineId=..., name=...` lines, two per client, each
+  followed by the matching `[client-N] RECV "Hello client-N-msg-M"`;
+- `[server] 客户端已全部结束, 当前连接数=...` and, after
+  `server.GracefulStop()`, `[server] grpc server shutdown`; the process exits 0.
+
+The default `--greet-delay` is 5s so the keepalive client has time to ping;
+use `--greet-delay 0s` for a quick smoke test. With the default delay the run
+takes about 10s (two calls per client).
+
+`go run .` is still a standalone protobuf scratch demo (prints two lines); it
+does not exercise the gRPC server.
 
 ## What a new test should look like
 

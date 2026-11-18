@@ -73,7 +73,7 @@ line says which side produced it:
 | Tag | Produced by |
 |---|---|
 | `[server] ` | library packages and the demo's server-side handler |
-| `[client-N] ` | the demo's client wrapper (`examples/tcp_fixed_head`) |
+| `[client-N] ` | the demo's client wrapper (`examples/tcp_fixed_head`, `examples/grpc`) |
 
 - The tag is the **first** thing in `content`, before any other text, so
   `^`-anchored filtering works on `.content` and plain substring filtering

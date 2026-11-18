@@ -1,7 +1,8 @@
 # Architecture: reactor + worker pool
 
-Repo-wide runtime model. Per-protocol detail lives in `tcp_fixed_head.md` and
-`websocket.md`; this file is the part both share.
+Runtime model for the gnet-based servers. Per-protocol detail lives
+in `tcp_fixed_head.md` and `websocket.md`; this file is the part both share.
+`grpc.md` describes the one server that is deliberately not gnet-based.
 
 ## The three layers
 

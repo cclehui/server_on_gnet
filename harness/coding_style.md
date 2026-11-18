@@ -14,7 +14,8 @@ Read this before writing or reviewing Go code here.
 | Shared helpers (logger, no-op codec) | `commonutil/*.go` |
 | One protocol server | `<protocol>/` — e.g. `tcp_fixed_head/`, `websocket/` |
 | Runnable demo + test client | `examples/<protocol>/` — one `package main` file |
-| Reference code (not gnet) | `grpc/`, `proto_temp.go` |
+| gRPC wrapper (not gnet) | `grpc/` |
+| Protobuf scratch demo | `proto_temp.go` |
 | Design overview (user-facing) | `docs/architecture.md` |
 
 Package names are the protocol, lowercase, with underscores when the protocol
@@ -50,11 +51,9 @@ the demo across files; a reader should get the whole scenario from one screen.
 
 `websocket/html_template.go` lives inside package `websocket` and exports
 `ClientTemplate` instead of being a `main` — the demo's HTTP page needs it, and
-a `main` package cannot be imported. Conversely `grpc/` and the repo root are
-`main` packages because they are demos. `grpc/grpc_temp_client.go` is just
-`package main` with no declarations: it keeps the file-name pair
-(client/server) visible, and `go build ./...` folds it into the same package as
-`grpc_temp_server.go`.
+a `main` package cannot be imported. `grpc/` is a library package wrapping
+`google.golang.org/grpc`, while `examples/grpc/` and the repo root are `main`
+packages because they are demos.
 
 ## Server Shape
 

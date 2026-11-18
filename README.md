@@ -2,8 +2,9 @@
 
 [English](./README_en.md) | 简体中文
 
-基于 [gnet/v2](https://github.com/panjf2000/gnet/v2) 事件驱动网络框架封装的 Go 服务端实现集合。
+以 [gnet/v2](https://github.com/panjf2000/gnet/v2) 事件驱动网络框架为主的 Go 服务端实现集合。
 每个协议一个独立包，开箱即用，并附带可直接运行的示例与测试客户端 —— 既适合学习 gnet 的用法，也适合作为新服务的起点。
+gRPC 自带传输层，因此 `grpc` 包直接包装 `google.golang.org/grpc`，不经过 gnet。
 
 - **模块路径**：`github.com/cclehui/server_on_gnet`
 - **Go 版本**：1.20+
@@ -13,8 +14,8 @@
 
 - **协议与业务分离**：`OnTraffic` 只做解码，业务处理统一投递到 ants 协程池，reactor 永不被阻塞。
 - **支持半包 / 粘包**：解析状态挂在连接的 `Context` 上，一条 TCP 流可以跨多次回调逐步还原完整消息。
-- **可替换的处理器**：每个 server 暴露 `Handler` 函数类型与默认实现，通过 option 注入自定义逻辑。
-- **完整生命周期**：实现 `gnet.EventHandle`，覆盖 `OnBoot` / `OnOpen` / `OnTraffic` / `OnClose` / `OnTick` / `OnShutdown`，并提供信号触发的优雅退出。
+- **可替换的处理器**：gnet 协议暴露 `Handler` 函数类型与默认实现；gRPC 通过 `ServiceRegistrar` 注册服务。
+- **完整生命周期**：gnet 协议实现 `gnet.EventHandle`，gRPC 包装层监听连接统计；两者都提供信号触发的优雅退出。
 - **可验证**：示例自带服务端 + 客户端，跑起来就能观察完整的收发与错误路径。
 
 ## `支持的协议`
@@ -23,7 +24,7 @@
 |---|---|---|---|
 | 固定头 TCP | [`tcp_fixed_head`](./tcp_fixed_head) | 可用 | 定长头 + 变长 body，头长度可配置（默认 8 字节），支持流式解码 |
 | WebSocket | [`websocket`](./websocket) | 可用 | 基于 `coder/websocket`，含空闲连接回收 |
-| gRPC | [`grpc`](./grpc) | 参考实现 | 独立 demo，未接入 gnet |
+| gRPC | [`grpc`](./grpc) | 可用 | 包装 `google.golang.org/grpc`，独立监听（不经过 gnet） |
 | Protobuf | 根目录 `proto_temp.go` | 参考实现 | 序列化 / 反序列化小示例 |
 
 ## 快速开始
@@ -77,8 +78,8 @@ go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ### 其他示例
 
 ```bash
-go run ./grpc   # gRPC keepalive 参考 demo，自带 client + server，监听 :50051
-go run .        # protobuf 序列化小 demo
+go run ./examples/grpc   # gRPC 服务端 + 内置 client（keepalive / 连接计数 / 优雅停机），监听 :50051
+go run .                 # protobuf 序列化小 demo
 ```
 
 ## 使用方式
@@ -149,6 +150,35 @@ server := websocket.NewServer("127.0.0.1:8081",
 )
 ```
 
+### gRPC 服务
+
+`grpc` 直接包装 `google.golang.org/grpc`，不经过 gnet：gRPC 自带 HTTP/2 多路复用和
+stream 生命周期，用 gnet 重写只会丢掉这些语义。这个包补的是监听、连接计数、日志和
+信号驱动停机，服务本身通过 `WithServiceRegistrar` 注册。
+
+```go
+server := grpc.NewServer(
+    grpc.WithAddr("127.0.0.1:50051"),
+    grpc.WithServiceRegistrar(func(s *grpcgo.Server) {
+        protobuf.RegisterGreeterServer(s, &helloServer{})
+    }),
+    grpc.WithKeepaliveParams(keepalive.ServerParameters{
+        Time:    5 * time.Second,
+        Timeout: time.Second,
+    }),
+)
+
+if err := server.Run(); err != nil {
+    log.Fatal(err)
+}
+```
+
+可用 option：`WithAddr`、`WithServiceRegistrar`、`WithGrpcOptions`、`WithStatsHandler`、
+`WithKeepaliveEnforcementPolicy`、`WithKeepaliveParams`、`WithContext`。
+`Run` 阻塞到服务退出，并自动处理 `SIGINT/SIGTERM` 等信号；程序内要主动停机调用
+`server.Stop()` 或 `server.GracefulStop()`。`server.GetConnNum()` 读取当前连接数，
+`server.LocalAddr()` 返回实际监听地址（`WithAddr(":0")` 时用它取系统分配端口）。
+
 ## 架构
 
 ```text
@@ -173,7 +203,7 @@ client ──TCP──► gnet reactor ──decode──► ants worker pool �
 ├── commonutil/          # 日志抽象与通用工具
 ├── tcp_fixed_head/      # 固定头 TCP 协议实现
 ├── websocket/           # WebSocket 服务实现（gnet + coder/websocket）
-├── grpc/                # gRPC keepalive 参考 demo（非 gnet）
+├── grpc/                # gRPC 服务封装（google.golang.org/grpc，非 gnet）
 ├── examples/            # 可直接运行的示例与测试客户端
 ├── harness/             # 编码规范与仓库知识（面向贡献者 / agent）
 ├── docs/                # 架构文档

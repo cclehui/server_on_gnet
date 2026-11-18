@@ -2,8 +2,9 @@
 
 English | [简体中文](./README.md)
 
-Ready-to-use Go server implementations built on the [gnet/v2](https://github.com/panjf2000/gnet/v2) event-driven networking framework.
+Ready-to-use Go server implementations, primarily on the [gnet/v2](https://github.com/panjf2000/gnet/v2) event-driven networking framework.
 Each protocol lives in its own package and ships with a runnable example plus a test client — useful both for learning how gnet works and as a starting point for new services.
+gRPC owns its transport, so the `grpc` package wraps `google.golang.org/grpc` directly instead of running on gnet.
 
 - **Module path**: `github.com/cclehui/server_on_gnet`
 - **Go version**: 1.20+
@@ -13,8 +14,8 @@ Each protocol lives in its own package and ships with a runnable example plus a 
 
 - **Protocol and business logic stay separate**: `OnTraffic` only decodes; work is dispatched to an ants goroutine pool, so the reactor never blocks.
 - **Partial and pipelined frames**: parse state lives in the connection `Context`, so a message can be reassembled across multiple callbacks.
-- **Pluggable handlers**: every server exposes a handler function type with a default implementation, injected through options.
-- **Full lifecycle**: implements `gnet.EventHandle` (`OnBoot` / `OnOpen` / `OnTraffic` / `OnClose` / `OnTick` / `OnShutdown`) with signal-driven graceful shutdown.
+- **Pluggable handlers**: gnet protocols expose a handler function type with a default implementation; gRPC registers services through `ServiceRegistrar`.
+- **Full lifecycle**: gnet protocols implement `gnet.EventHandle`; the gRPC wrapper tracks connections through stats callbacks. Both shut down gracefully on signals.
 - **Verifiable**: each example starts a real server and drives a real client, so both the success and failure paths are observable.
 
 ## Supported Protocols
@@ -23,7 +24,7 @@ Each protocol lives in its own package and ships with a runnable example plus a 
 |---|---|---|---|
 | Fixed-header TCP | [`tcp_fixed_head`](./tcp_fixed_head) | Available | Fixed-length header + variable body, header length configurable (8 bytes by default), streaming decode |
 | WebSocket | [`websocket`](./websocket) | Available | Built on `coder/websocket`, with idle-connection eviction |
-| gRPC | [`grpc`](./grpc) | Reference | Standalone demo, not integrated with gnet |
+| gRPC | [`grpc`](./grpc) | Available | Wraps `google.golang.org/grpc`; listens directly (not through gnet) |
 | Protobuf | root `proto_temp.go` | Reference | Small marshal / unmarshal demo |
 
 ## Quick Start
@@ -77,8 +78,8 @@ go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ### Other Demos
 
 ```bash
-go run ./grpc   # gRPC keepalive reference demo with an in-process client and server, :50051
-go run .        # protobuf marshal / unmarshal demo
+go run ./examples/grpc   # gRPC server + built-in client (keepalive, connection count, graceful stop), :50051
+go run .                 # protobuf marshal / unmarshal demo
 ```
 
 ## Usage
@@ -150,6 +151,38 @@ server := websocket.NewServer("127.0.0.1:8081",
 )
 ```
 
+### gRPC Server
+
+`grpc` wraps `google.golang.org/grpc` directly instead of running on gnet: gRPC
+already owns HTTP/2 multiplexing and stream lifecycle, so re-implementing it on
+a raw reactor would only lose those semantics. The package adds listening,
+connection counting, logging, and signal-driven shutdown; services are supplied
+through `WithServiceRegistrar`.
+
+```go
+server := grpc.NewServer(
+    grpc.WithAddr("127.0.0.1:50051"),
+    grpc.WithServiceRegistrar(func(s *grpcgo.Server) {
+        protobuf.RegisterGreeterServer(s, &helloServer{})
+    }),
+    grpc.WithKeepaliveParams(keepalive.ServerParameters{
+        Time:    5 * time.Second,
+        Timeout: time.Second,
+    }),
+)
+
+if err := server.Run(); err != nil {
+    log.Fatal(err)
+}
+```
+
+Available options: `WithAddr`, `WithServiceRegistrar`, `WithGrpcOptions`,
+`WithStatsHandler`, `WithKeepaliveEnforcementPolicy`, `WithKeepaliveParams`,
+`WithContext`. `Run` blocks until the server exits and handles `SIGINT`/`SIGTERM`
+itself; call `server.Stop()` or `server.GracefulStop()` for an in-process stop.
+`server.GetConnNum()` returns the live connection count and `server.LocalAddr()`
+returns the bound address (useful with `WithAddr(":0")`).
+
 ## Architecture
 
 ```text
@@ -174,7 +207,7 @@ See [docs/architecture.md](./docs/architecture.md) for the full package map, lif
 ├── commonutil/          # logger abstraction and small utilities
 ├── tcp_fixed_head/      # fixed-header TCP protocol
 ├── websocket/           # WebSocket server (gnet + coder/websocket)
-├── grpc/                # gRPC keepalive reference demo (not gnet-based)
+├── grpc/                # gRPC server wrapper (google.golang.org/grpc, not gnet-based)
 ├── examples/            # runnable demos and test clients
 ├── harness/             # coding style and repo knowledge for contributors / agents
 ├── docs/                # architecture docs

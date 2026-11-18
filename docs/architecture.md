@@ -1,8 +1,9 @@
 # server_on_gnet Architecture
 
-A Go library of ready-to-use server implementations built on top of the
+A Go library of ready-to-use server implementations, primarily on top of the
 [gnet](https://github.com/panjf2000/gnet/v2) event-driven networking framework.
-Module path: `github.com/cclehui/server_on_gnet`, Go 1.20.
+Module path: `github.com/cclehui/server_on_gnet`, Go 1.20. `grpc/` is the
+exception: it wraps `google.golang.org/grpc`, which owns its HTTP/2 transport.
 
 ## High-Level Design
 
@@ -38,8 +39,8 @@ All gnet-based servers follow the same core pattern:
 | `commonutil/` | Shared logger abstraction and small utilities |
 | `tcp_fixed_head/` | Fixed-header / variable-body TCP protocol server |
 | `websocket/` | WebSocket server (gnet + coder/websocket) with idle-conn management |
-| `grpc/` | Standalone gRPC + protobuf demo (not gnet-based, reference code) |
-| `examples/` | Runnable demos with test clients for both server types |
+| `grpc/` | gRPC server wrapper (`google.golang.org/grpc`, not gnet-based) |
+| `examples/` | Runnable demos and test clients for each server type |
 | root (`proto_temp.go`) | Protobuf marshal/unmarshal scratch demo |
 | `harness/` | Coding style + repo knowledge for agents/contributors |
 
@@ -152,12 +153,31 @@ copy InboundBuffered()  ───► inboundBuffer (blocking io.Reader)
 - `html_template.go`: `ClientTemplate` — a browser HTML/JS test client; the
   message pane prepends new frames so the newest response stays on top.
 
-### grpc (reference / TODO)
+### grpc — gRPC wrapper (not gnet-based)
 
-Plain `google.golang.org/grpc` demo with keepalive policies
-(`grpc_temp_server.go` includes an in-process client) and generated protobufs
-(`protobuf/hello.proto`, `protobuf/temp.proto`). Not integrated with gnet —
-kept as learning material for the "pb protocol over gnet" TODO.
+`grpc.Server` wraps `google.golang.org/grpc.Server`; it does not run on gnet.
+gRPC already owns HTTP/2 framing, multiplexing, and stream lifecycle, so the
+wrapper only adds listening, connection counting, lifecycle logging, and
+signal-driven graceful shutdown.
+
+- `server_factory.go`: `NewServer(opts...)` — options first, then `Addr`
+  (`DefaultAddr`, overridable with `WithAddr`) and `context.Background()`.
+- `option.go`: `WithAddr`, `WithServiceRegistrar`, `WithGrpcOptions`,
+  `WithStatsHandler`, `WithKeepaliveEnforcementPolicy`,
+  `WithKeepaliveParams`, `WithContext`.
+- `handler.go`: `ServiceRegistrar` — the extension point. There is no
+  `ServerHandler`; gRPC services are registered with the generated
+  `RegisterXxxServer(server, impl)` functions.
+- `server.go`: `Run` blocks on `Serve`, installs a signal goroutine
+  (SIGHUP/QUIT/TERM/INT → `GracefulStop`), and exposes `Stop`,
+  `GracefulStop`, `LocalAddr`, `GetConnNum`.
+- `stats.go`: a `stats.Handler` wrapper counts `stats.ConnBegin` /
+  `stats.ConnEnd`; an optional caller handler is forwarded.
+- `protobuf/`: generated code for `hello.proto` and `temp.proto`; the root
+  `proto_temp.go` is still a protobuf scratch demo.
+
+The example (`examples/grpc`) runs the server and an in-process keepalive
+client, then stops the server itself. See `harness/knowledge/grpc.md`.
 
 ## Running the Examples
 
@@ -175,6 +195,10 @@ go run ./examples/websocket
 # Scripted WS client: echo round-trips + a frame split across TCP segments +
 # concurrent connections. Exits non-zero on failure.
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
+
+# gRPC server on :50051 plus an in-process keepalive client. Runs a few RPCs,
+# prints connection counts, then gracefully stops and exits.
+go run ./examples/grpc --addr 127.0.0.1:50051 --conns 3 --msgs 2 --greet-delay 0s
 ```
 
 Common gnet options used by examples: `WithReusePort(true)`,
@@ -208,9 +232,11 @@ Recorded so they are not mistaken for intended behavior. Details live in
 
 ## Extension Points / Conventions
 
-- New protocol server = implement `gnet.EventHandle` in its own package,
+- New gnet protocol server = implement `gnet.EventHandle` in its own package,
   decode in `OnTraffic`, offload to ants, expose a `Handler` func type and a
-  `New*Server` constructor (see `tcp_fixed_head` as the template).
+  `New*Server` constructor (see `tcp_fixed_head` as the template). Protocols
+  that already own their transport (gRPC) wrap the upstream server instead;
+  see `grpc/`.
 - Streaming decode always uses the conn-context pattern: parse header once,
   stash expected length, wait for the full body.
 - Logging goes through `commonutil.GetLogger()`, never `fmt`/`log` directly,
