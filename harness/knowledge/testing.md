@@ -129,6 +129,36 @@ takes about 10s (two calls per client).
 `go run .` is still a standalone protobuf scratch demo (prints two lines); it
 does not exercise the gRPC server.
 
+### mqtt
+
+`examples/mqtt` starts the broker on a high port (1883 needs root) plus 4
+scripted clients built on the real `paho.mqtt.golang` client, then exits on its
+own:
+
+```bash
+timeout 25 go run ./examples/mqtt --port 11883
+```
+
+Pass criteria (per client, log interleaving between clients is not stable):
+
+- `client-a` gets `demo/room1/temp = 23.5C` through the `demo/+/temp` filter,
+  logs `确认没有收到 demo/room2/humidity`, and gets its own `self-echo` back;
+- `client-d` subscribed *after* `client-c` published with `retain=1` and still
+  logs `收到保留消息 topic="demo/status" payload="online"`;
+- `client-c` logs `连接断开: EOF` and
+  `qos=1 的 Publish 报错, 符合预期: connection lost before Publish completed`,
+  matching the server's `[server] 解包失败 ... qos > 0 not supported: PUBLISH
+  qos=1` — the demo's deliberate QoS 1 rejection, not a bug;
+- the final line is `[server] 连接已回收: conns=0 sessions=0`.
+
+The process does not exit on its own once the clients are done; stop it with
+`Ctrl-C`, or wrap it in `timeout` as above. The broker is not TLS/ACL
+protected — bind it to a high local port, never a public interface.
+
+For changes to framing, the subscription tree, retain/will, or keepalive, build
+the demo with `-race` and drive it with concurrent clients; see
+`harness/knowledge/mqtt.md` for the rules those paths must keep.
+
 ## What a new test should look like
 
 If you add tests, they belong next to the code (`tcp_fixed_head/*_test.go`) and

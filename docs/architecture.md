@@ -2,7 +2,7 @@
 
 A Go library of ready-to-use server implementations, primarily on top of the
 [gnet](https://github.com/panjf2000/gnet/v2) event-driven networking framework.
-Module path: `github.com/cclehui/server_on_gnet`, Go 1.20. `grpc/` is the
+Module path: `github.com/cclehui/server_on_gnet`, Go 1.24. `grpc/` is the
 exception: it wraps `google.golang.org/grpc`, which owns its HTTP/2 transport.
 
 ## High-Level Design
@@ -40,6 +40,7 @@ All gnet-based servers follow the same core pattern:
 | `tcp_fixed_head/` | Fixed-header / variable-body TCP protocol server |
 | `websocket/` | WebSocket server (gnet + coder/websocket) with idle-conn management |
 | `grpc/` | gRPC server wrapper (`google.golang.org/grpc`, not gnet-based) |
+| `mqtt/` | MQTT 3.1.1 broker (QoS 0): varint framing, subscription tree, retained store |
 | `examples/` | Runnable demos and test clients for each server type |
 | root (`proto_temp.go`) | Protobuf marshal/unmarshal scratch demo |
 | `harness/` | Coding style + repo knowledge for agents/contributors |
@@ -241,7 +242,11 @@ Recorded so they are not mistaken for intended behavior. Details live in
   stash expected length, wait for the full body.
 - Logging goes through `commonutil.GetLogger()`, never `fmt`/`log` directly,
   in library packages.
-- TODOs from README: MQTT and the long-connection maintenance platform.
+- The MQTT broker (`mqtt/`) is the one server whose protocol state machine runs
+  in the reactor instead of the ants pool: packet handlers on one connection are
+  strictly ordered (CONNECT → SUBSCRIBE → PUBLISH), and ants does not preserve
+  submission order. Only the user-defined `ServerHandler` call is offloaded.
+- TODOs from README: the long-connection maintenance platform.
 
 ## Quality Tooling
 

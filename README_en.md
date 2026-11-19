@@ -7,7 +7,7 @@ Each protocol lives in its own package and ships with a runnable example plus a 
 gRPC owns its transport, so the `grpc` package wraps `google.golang.org/grpc` directly instead of running on gnet.
 
 - **Module path**: `github.com/cclehui/server_on_gnet`
-- **Go version**: 1.20+
+- **Go version**: 1.24+
 - **License**: MIT
 
 ## Highlights
@@ -25,11 +25,12 @@ gRPC owns its transport, so the `grpc` package wraps `google.golang.org/grpc` di
 | Fixed-header TCP | [`tcp_fixed_head`](./tcp_fixed_head) | Available | Fixed-length header + variable body, header length configurable (8 bytes by default), streaming decode |
 | WebSocket | [`websocket`](./websocket) | Available | Built on `coder/websocket`, with idle-connection eviction |
 | gRPC | [`grpc`](./grpc) | Available | Wraps `google.golang.org/grpc`; listens directly (not through gnet) |
+| MQTT | [`mqtt`](./mqtt) | Available | MQTT 3.1.1 broker: QoS 0, `+`/`#` wildcards, retain, will, keepalive; codec via `paho.mqtt.golang/packets` |
 | Protobuf | root `proto_temp.go` | Reference | Small marshal / unmarshal demo |
 
 ## Quick Start
 
-Requires Go 1.20 or newer. No database, no external service: everything is a process plus a socket.
+Requires Go 1.24 or newer (`mqtt` depends on `eclipse/paho.mqtt.golang` v1.5). No database: everything is a process plus a socket.
 
 ```bash
 git clone https://github.com/cclehui/server_on_gnet.git
@@ -74,6 +75,19 @@ Covers echo round-trips, a frame split across TCP segments, and concurrent conne
 # Start the WebSocket demo above first
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
+
+### MQTT Demo
+
+An MQTT 3.1.1 broker implementing **QoS 0 only** (higher QoS is rejected explicitly, never silently downgraded).
+The example starts a broker plus 4 built-in clients covering wildcard subscriptions, retain, self-publish echo, and QoS 1 rejection:
+
+```bash
+# Port 11883 by default (1883 needs root)
+go run ./examples/mqtt --port 11883
+```
+
+> `client-c` deliberately publishes with `qos=1` at the end, so the broker disconnects it.
+> The `qos > 0 not supported` log line is the point of the demo, not a failure.
 
 ### gRPC Demo
 
@@ -270,7 +284,6 @@ see [harness/knowledge/testing.md](./harness/knowledge/testing.md).
 
 ## Roadmap
 
-- [ ] MQTT protocol
 - [ ] Long-connection maintenance platform
 
 ## License

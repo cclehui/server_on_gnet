@@ -7,7 +7,7 @@
 gRPC 自带传输层，因此 `grpc` 包直接包装 `google.golang.org/grpc`，不经过 gnet。
 
 - **模块路径**：`github.com/cclehui/server_on_gnet`
-- **Go 版本**：1.20+
+- **Go 版本**：1.24+
 - **许可证**：MIT
 
 ## 特性
@@ -25,11 +25,12 @@ gRPC 自带传输层，因此 `grpc` 包直接包装 `google.golang.org/grpc`，
 | 固定头 TCP | [`tcp_fixed_head`](./tcp_fixed_head) | 可用 | 定长头 + 变长 body，头长度可配置（默认 8 字节），支持流式解码 |
 | WebSocket | [`websocket`](./websocket) | 可用 | 基于 `coder/websocket`，含空闲连接回收 |
 | gRPC | [`grpc`](./grpc) | 可用 | 包装 `google.golang.org/grpc`，独立监听（不经过 gnet） |
+| MQTT | [`mqtt`](./mqtt) | 可用 | MQTT 3.1.1 broker，QoS 0、`+`/`#` 通配、retain、will、keepalive；编解码用 `paho.mqtt.golang/packets` |
 | Protobuf | 根目录 `proto_temp.go` | 参考实现 | 序列化 / 反序列化小示例 |
 
 ## 快速开始
 
-环境要求：Go 1.20 及以上。无外部依赖、无需数据库，起进程 + 连 socket 即可。
+环境要求：Go 1.24 及以上（`mqtt` 依赖 `eclipse/paho.mqtt.golang` v1.5）。无数据库，起进程 + 连 socket 即可。
 
 ```bash
 git clone https://github.com/cclehui/server_on_gnet.git
@@ -74,6 +75,19 @@ go run ./examples/websocket --ip 0.0.0.0 --ws-port 9081 --http-port 9080
 # 需先启动上面的 WebSocket 服务端
 go run ./examples/websocket_client -addr ws://127.0.0.1:8081 -conns 8 -msgs 5
 ```
+
+### MQTT 示例
+
+MQTT 3.1.1 broker，只实现 **QoS 0**（其他 QoS 在协议层明确拒绝，不静默降级）。
+示例起一个 broker 和 4 个内置客户端，覆盖通配订阅、retain、自发布回显和 QoS 1 被拒绝：
+
+```bash
+# 默认端口 11883（1883 需要 root）
+go run ./examples/mqtt --port 11883
+```
+
+> `client-c` 最后会故意用 `qos=1` 发布，服务端按设计断开该连接。
+> 日志里的 `qos > 0 not supported` 是演示设计，不是故障。
 
 ### gRPC 示例
 
@@ -264,7 +278,6 @@ go test ./...   # 当前各包均无测试文件（已知缺口）
 
 ## Roadmap
 
-- [ ] MQTT 协议
 - [ ] 长连接维持平台
 
 ## License
